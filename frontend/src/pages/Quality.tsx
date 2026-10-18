@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, FlaskConical, Microscope, ShieldQuestion, TestTubeDiagonal, XCircle } from "lucide-react";
+import { CheckCircle2, FlaskConical, Microscope, ShieldQuestion, Sparkles, TestTubeDiagonal, XCircle } from "lucide-react";
 import { api } from "../lib/api";
 import { useLive, usePoll } from "../lib/live";
 import { Empty, Loader, SevPill, StatusPill, toast } from "../components/ui";
@@ -15,17 +15,24 @@ const PARAMS = [
   { k: "tds_mgl", label: "TDS", unit: "mg/L", d: 0, max: 2000, good: (v: number) => v <= 500, ok: (v: number) => v <= 2000, ref: "acceptable 500 · permissible 2000" },
 ];
 
+const REASON: Record<string, (r: any) => string> = {
+  alert: (r) => `quality alert ${r.incident} open`, leak: () => "leak or repair on this lane", pressure: () => "pressure loss or supply cut today",
+  chlorine: (r) => `chlorine ${r.v} mg/L (${r.basis})`, turbidity: (r) => `turbidity ${r.v} NTU at the tank`, reports: (r) => `${r.n} dirty-water report(s)`,
+  sites: (r) => r.s, intermittent: () => "intermittent supply", stale: (r) => `not tested for ${r.n} days`, never: () => "not tested yet",
+};
+
 export function Quality() {
   const { village, focus } = useLive();
   const nav = useNavigate();
   const { data: q, reload } = usePoll<any>(`/api/quality?village=${village}`, 3000);
   const { data: tr } = usePoll<any>(`/api/villages/${village}/trends?limit=160`, 5000);
-  const [form, setForm] = useState<any>({ sample_point: "Tank outlet", kind: "FTK", turbidity_ntu: "", chlorine_mgl: "", ph: "", tds_mgl: "", h2s_positive: false, incident_id: "" });
+  const [form, setForm] = useState<any>({ sample_point: "Tank outlet", kind: "FTK", h2s_positive: false, incident_id: "" });
+  const { data: plan } = usePoll<any>(`/api/quality/plan?village=${village}`, 6000);
   const [busy, setBusy] = useState(false);
   if (!q) return <div className="page"><Loader /></div>;
 
   const sample = async () => {
-    try { const s = await api(`/api/quality/ftk-sample?village=${village}`); setForm({ ...form, ...s.params }); } catch (e: any) { toast(e.message, true); }
+    try { const s = await api(`/api/quality/ftk-sample?village=${village}&point=${encodeURIComponent(form.sample_point)}`); setForm({ ...form, ...s.params }); } catch (e: any) { toast(e.message, true); }
   };
   const pull = async () => {
     try {
@@ -38,7 +45,7 @@ export function Quality() {
     setBusy(true);
     try {
       const params: any = { h2s_positive: !!form.h2s_positive };
-      for (const p of PARAMS) if (form[p.k] !== "" && form[p.k] != null) params[p.k] = Number(form[p.k]);
+      for (const k of [...q.ftk_params.map((p: any) => p.key), "turbidity_ntu", "tds_mgl"]) if (form[k] !== "" && form[k] != null) params[k] = Number(form[k]);
       const r = await api("/api/quality/tests", { body: { village_id: village, sample_point: form.sample_point, kind: form.kind, params, incident_id: form.incident_id || null } });
       toast(r.result === "pass" ? `${r.id}: PASS, recorded and queued for WQMIS sync` : `${r.id}: FAIL (${r.failed_checks.join("; ")})`, r.result !== "pass");
       reload();
@@ -96,13 +103,26 @@ export function Quality() {
               <div><label className="f">Sample point</label><select className="select" value={form.sample_point} onChange={(e) => setForm({ ...form, sample_point: e.target.value })}>{q.sample_points.map((p: string) => <option key={p}>{p}</option>)}</select></div>
               <div><label className="f">Test type</label><select className="select" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}><option value="FTK">Field Test Kit</option><option value="LAB">Laboratory</option></select></div>
               <div><label className="f">Link to open incident</label><select className="select" value={form.incident_id} onChange={(e) => setForm({ ...form, incident_id: e.target.value })}><option value="">None (routine surveillance)</option>{q.open.map((i: any) => <option key={i.id} value={i.id}>{i.id} · {i.title.slice(0, 40)}</option>)}</select></div>
-              {PARAMS.map((p) => <div key={p.k}><label className="f">{p.label}{p.unit ? ` (${p.unit})` : ""}</label><input className="input" inputMode="decimal" value={form[p.k]} onChange={(e) => setForm({ ...form, [p.k]: e.target.value })} placeholder={p.ref} /></div>)}
+              {q.ftk_params.map((p: any) => <div key={p.key}><label className="f">{p.label}{p.unit ? ` (${p.unit})` : ""}</label>
+                <select className="select" value={form[p.key] ?? ""} onChange={(e) => setForm({ ...form, [p.key]: e.target.value === "" ? null : Number(e.target.value) })}>
+                  <option value="">not read</option>{p.steps.map((s: number) => <option key={s} value={s}>{s}</option>)}</select></div>)}
+              {form.kind === "LAB" && [["turbidity_ntu", "Turbidity (NTU)"], ["tds_mgl", "TDS (mg/L)"]].map(([k, l]) => <div key={k}><label className="f">{l}</label><input className="input" inputMode="decimal" value={form[k] ?? ""} onChange={(e) => setForm({ ...form, [k]: e.target.value })} /></div>)}
             </div>
             <label className="row sm" style={{ margin: "12px 0", cursor: "pointer" }}><input type="checkbox" checked={!!form.h2s_positive} onChange={(e) => setForm({ ...form, h2s_positive: e.target.checked })} />H2S vial turned black within 24 to 48 h (possible bacteriological contamination)</label>
             <button className="btn" disabled={busy} onClick={save}><Microscope />Save and queue for WQMIS sync</button>
           </div>
         </div>
         <div className="stack">
+          {plan && <div className="card"><div className="card-h"><h3><Sparkles />Where to test first</h3><a className="btn soft sm" href="/tester" target="_blank" rel="noreferrer">Jal Sakhi app ↗</a></div>
+            <div className="card-b stack" style={{ gap: 8 }}>
+              {plan.points.slice(0, 4).map((p: any) => (
+                <button key={p.name} className="scn" style={{ gridTemplateColumns: "44px 1fr" }} onClick={() => setForm({ ...form, sample_point: p.name })} title="Use this sample point">
+                  <span className="ic" style={{ flexDirection: "column", fontWeight: 760, background: p.today ? (p.score >= 50 ? "var(--crit-bg)" : "var(--warn-bg)") : "var(--surface-2)", color: "var(--ink)" }}>{p.score}</span>
+                  <span><b>{p.name}</b>{p.today && <span className="pill medium" style={{ marginLeft: 6 }}>today</span>}
+                    <span className="desc">{p.reasons.slice(0, 2).map((r: any) => REASON[r.code]?.(r) || r.code).join(" · ")}</span></span>
+                </button>))}
+              <p className="xs muted">{plan.method}</p>
+            </div></div>}
           <div className="card"><div className="card-h"><h3>Open quality concerns</h3></div><div className="card-b">
             {q.open.length === 0 ? <Empty>No open quality concerns.</Empty> : q.open.map((i: any) => (
               <button key={i.id} className="scn" style={{ gridTemplateColumns: "1fr", marginBottom: 8 }} onClick={() => nav(`/app/incidents/${i.id}`)}>
@@ -113,7 +133,7 @@ export function Quality() {
             {q.tests.length === 0 ? <p className="sm muted">No tests recorded in this session.</p> : q.tests.map((t: any) => (
               <div key={t.id} className="row between sm" style={{ padding: "7px 0", borderBottom: "1px solid var(--line)" }}>
                 <div><b>{t.id}</b> · {t.kind} · {t.sample_point}<div className="xs muted">{dt(t.ts)} · {t.tested_by}{t.incident_id ? ` · ${t.incident_id}` : ""} · turbidity {n1(t.params.turbidity_ntu)} · Cl {n1(t.params.chlorine_mgl, 2)}{t.params.tds_mgl != null ? ` · TDS ${n0(t.params.tds_mgl)}` : ""}</div></div>
-                <span className={`pill ${t.result === "pass" ? "good" : "critical"}`} title={t.lab_status || ""}>{t.kind === "LAB" ? "lab " : ""}{t.result}{t.lab_status === "requested" ? " · lab requested" : t.lab_status?.startsWith("lab ") ? ` · ${t.lab_status.split(":")[0]}` : ""}</span>
+                <span className={`pill ${t.result === "pass" ? "good" : t.result === "pending" ? "medium" : "critical"}`} title={t.lab_status || ""}>{t.kind === "LAB" ? "lab " : ""}{t.result}{t.lab_status === "requested" ? " · lab requested" : t.lab_status?.startsWith("lab ") ? ` · ${t.lab_status.split(":")[0]}` : ""}</span>
               </div>))}
           </div></div>
         </div>
