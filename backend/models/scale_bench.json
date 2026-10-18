@@ -1,0 +1,25 @@
+{
+  "measured": true,
+  "measured_at": "2026-10-05 00:27",
+  "machine": {
+    "cpu": "AMD64 Family 25 Model 117 Stepping 2, AuthenticAMD",
+    "cores": 16,
+    "os": "Windows 11",
+    "python": "3.13.5"
+  },
+  "villages": 6,
+  "households": 568,
+  "devices": 191,
+  "tick_ms": 75.5,
+  "per_village_ms": 12.59,
+  "readings_per_tick": 190,
+  "villages_by_compute": 4766,
+  "villages_by_ingest": 560,
+  "limit": "ingest",
+  "villages_planned": 280,
+  "headroom": 0.5,
+  "ingest_per_s": 297,
+  "bytes_per_reading": 395,
+  "gb_per_village_year": 2.13,
+  "basis": "one process, SQLite, one reading per device per minute while water is being supplied; the village simulator runs inside the measured loop. The ingest route commits every reading by itself, which is what limits it."
+}
