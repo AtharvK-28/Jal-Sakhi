@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# runtime data: SQLite database and uploaded photos are recreated on every start
+backend/data/
+
+# Node
+frontend/node_modules/
+
+# Video production workspace and heavy assets
+DemoVideo/
+
+# Environments
+.venv/
+venv/
+env/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# The built UI (frontend/dist) and trained models (backend/models) are kept in the repo on purpose,
+# so the demo machine needs only Python to run. Rebuild with `python run.py --rebuild`.
