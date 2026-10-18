@@ -1,0 +1,22 @@
+{
+  "name": "JalSakhi · Har Ghar Jal",
+  "short_name": "JalSakhi",
+  "description": "Your tap's water status, alerts and complaints in your language. Works without network; reports are sent when it returns. Demo data.",
+  "id": "/citizen",
+  "start_url": "/citizen",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#062a4a",
+  "theme_color": "#0a5b99",
+  "lang": "en-IN",
+  "categories": ["utilities", "government"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Report a problem", "short_name": "Report", "url": "/citizen?tab=report", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

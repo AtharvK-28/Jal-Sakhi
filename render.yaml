@@ -9,5 +9,11 @@ services:
         value: 3.11.9
       - key: CORS_ORIGINS
         value: "*"
+      - key: TELEGRAM_BOT_TOKEN  # phone alerts; set the value in the Render dashboard, never in this file
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_ID
+        sync: false
     healthCheckPath: /api/health
     autoDeploy: true

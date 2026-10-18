@@ -179,6 +179,51 @@ stays open for 30 days, during which every household can agree or disagree from 
 Exports for other systems: the scheme as GeoJSON (GIS map page) and the daily service record as CSV
 (Analytics page).
 
+## Phone alerts
+
+Every incident also goes to a phone (**Phone alerts** page; `backend/app/core/alerts.py`). Routing follows
+the escalation ladder: the operator and Pani Samiti when it opens, the block JE if the village has not
+acknowledged within the SLA (at once if critical), the district EE if it is not resolved in time.
+Households linked to the citizen app get their lane's alerts in their own language.
+
+Replies work too. Staff can tap **Acknowledge** or **Start work** on the alert, and the incident updates
+with the phone named in the audit trail. A household can report in its own words, send a photo and its
+location, answer YES or NO to "is it fixed?", or send STATUS.
+
+| Channel | Set on the server | Notes |
+|---|---|---|
+| Telegram (two-way) | `TELEGRAM_BOT_TOKEN` from @BotFather | Long polling, so it also works from a laptop. Run one copy per bot. |
+| WhatsApp Cloud API | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_ID`, `WHATSAPP_NUMBER`; for replies `WHATSAPP_VERIFY_TOKEN` (+ `WHATSAPP_APP_SECRET`) with the webhook at `/api/whatsapp/webhook` | Business-initiated text needs an open 24-hour window or an approved template. |
+| SMS | `SMS_GATEWAY_URL`, `SMS_GATEWAY_AUTH`, `SMS_SENDER_ID`, `SMS_DLT_TEMPLATE_ID` | Any HTTP gateway. In India the sender and template must be DLT-registered. |
+
+With no channel set, every alert is still routed and written, then logged as **sandbox**: it is never
+reported as sent. The four seeded recipients use the placeholder DEMO numbers and always stay in sandbox.
+To link a phone, open Phone alerts and choose **Make a link code**, or in the citizen app tap
+**Get alerts on my phone**. A code links one phone and expires after 30 minutes. Each phone gets at most
+15 messages in 10 minutes.
+
+## Interoperability
+
+- **The ministry's device message.** The DDWS roadmap (March 2021) gives a reference gateway payload
+  (`gid`, `did`, `dty`, `dt`, `p` with `b` battery and `e` error). `POST /api/telemetry/ddws` accepts it
+  and `GET /api/interop/ddws/{village}` publishes each village's latest readings in it. The types
+  fm/sl/gl/ca and the keys t/f/b/e come from the report; pt, pm and the other keys are marked as
+  JalSakhi extensions.
+- **JJM platforms.** Every outbox record carries the body each platform would receive (IMIS, Sujal Gaon /
+  Sujalam Bharat, WQMIS, Jal Seva Aankalan). The field-by-field mapping is on the sync page. The JalSakhi
+  side of each row is exact. The target field names are drafts until NIC / DDWS issue the API specification.
+- **WQMIS inbound.** `POST /api/quality/lab-results` takes laboratory results for samples a failed field
+  test referred. Each result closes the referral, joins the incident's closure evidence and tells the
+  households: a boil advisory on a fail, an all-clear on a pass. On the quality page,
+  **DEMO: lab results from WQMIS** answers open referrals from the simulated water.
+
+## Installable, works offline
+
+The citizen app is a PWA (`frontend/public/manifest.webmanifest`, `sw.js`). It installs to the home
+screen and opens without network, showing the last known status. A report made offline waits on the
+phone, photo included, in IndexedDB. It is sent by background sync where the browser supports it, or
+by the page when the network returns. Photos are shrunk to 1600 px before upload.
+
 ## How few sensors, and how far it scales
 
 Two questions a deployment has to answer, both answered from this repository rather than asserted.
@@ -213,7 +258,7 @@ backend/app/sim/        village hydraulics, clock, scenario engine, simulated ci
 backend/app/core/       ingestion, state estimation + detection, incidents, complaints, sync, security, analytics, upkeep and accounts
 backend/app/ml/         training, model bundle, complaint corpus
 backend/app/main.py     FastAPI routes
-backend/tests/          the test plan as code (37 tests)
+backend/tests/          the test plan as code (45 tests)
 frontend/src/           React UI (staff pages, citizen app, twin, charts)
 firmware/               ESP32 reference node
 docs/                   original planning documents
@@ -221,12 +266,14 @@ docs/                   original planning documents
 
 ## Tests
 
-`python run.py --test` runs 37 tests in about two minutes: T01 to T14 from the planning doc, plus ML
+`python run.py --test` runs 45 tests in about two minutes: T01 to T14 from the planning doc, plus ML
 early-warning, pump prediction, role/jurisdiction checks, override rules, sync outage recovery,
 FTK-gated quality closure, multi-level roll-up, the village map layout, the stale-server check, fault typing and
 placement, pump remaining life, the what-if planner, replay, the water balance, single-tap faults, the hardware
 node taking over a home, head-to-tail equity, leak closure, the sensor study, the upkeep plan with the operator log
-and accounts, the five-part Aankalan with its feedback window, and the scheme exports.
+and accounts, the five-part Aankalan with its feedback window, the scheme exports, phone alerts (routing, linking, acknowledging from a phone, reports with photo and
+location, repair confirmation, WhatsApp webhook, rate limits), the ministry device format in and out, platform-shaped
+sync payloads, and WQMIS laboratory results closing a quality incident.
 The simulator is stepped manually, so results are repeatable.
 
 ## Check before you present

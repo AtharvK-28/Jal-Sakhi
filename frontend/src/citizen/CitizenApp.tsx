@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Ban, BellRing, Camera, Check, CheckCircle2, ChevronRight, Clock, CloudOff, Droplets, FlaskConical, Gauge, GlassWater, Home, IndianRupee, Languages, ListChecks,
-  MapPin, MessageSquare, Mic, MoreHorizontal, Phone, Receipt, ScrollText, Search, Send, Sparkles, ThumbsDown, ThumbsUp, Users, Volume2, Wind, Wrench,
+  Ban, BellRing, Camera, Check, CheckCircle2, ChevronRight, Clock, CloudOff, Download, Droplets, FlaskConical, Gauge, GlassWater, Home, IndianRupee, Languages, ListChecks,
+  MapPin, MessageCircle, MessageSquare, Mic, MoreHorizontal, Phone, Receipt, ScrollText, Search, Send, Smartphone, Sparkles, ThumbsDown, ThumbsUp, Users, Volume2, Wind, Wrench,
 } from "lucide-react";
-import { api } from "../lib/api";
+import { api, resolveUrl } from "../lib/api";
+import { flushReports, migrateLegacyQueue, pendingCount, queueReport, shrinkPhoto } from "../lib/offline";
 import { LANGS, Lang, makeT } from "../lib/i18n";
 import { Drop, LiquidGauge, ToastHost, Waves, toast } from "../components/ui";
 import { hhmm, n0 } from "../lib/format";
@@ -11,8 +12,8 @@ import { hhmm, n0 } from "../lib/format";
 const CATS: [string, any][] = [["no_water", Ban], ["low_pressure", Gauge], ["dirty_water", GlassWater], ["leakage", Droplets], ["smell_taste", Wind], ["irregular", Clock], ["tap_damage", Wrench], ["other", MoreHorizontal]];
 const STEPS = ["open", "acknowledged", "in_progress", "resolved_pending_verification", "closed"];
 const TYPE_CAT: Record<string, string> = { SUPPLY_INTERRUPTION: "no_water", LOW_PRESSURE: "low_pressure", SUSPECTED_LEAK: "leakage", QUALITY_VERIFY: "dirty_water", COMMUNITY_CLUSTER: "dirty_water", PUMP_FAULT: "no_water" };
-const QKEY = "jalsakhi.citizen.queue";
 const SKEY = "jalsakhi.citizen";
+const REPORT_URL = () => resolveUrl("/api/complaints");
 
 type Saved = { lang: Lang; household: string; village: string } | null;
 const load = (): Saved => { try { return JSON.parse(localStorage.getItem(SKEY) || "null"); } catch { return null; } };
@@ -63,44 +64,49 @@ function Onboard({ lang, setLang, t, onDone }: { lang: Lang; setLang: (l: Lang) 
 
 // ------------------------------------------------------------------------ main
 function Main({ saved, t, lang, onReset }: { saved: NonNullable<Saved>; t: any; lang: Lang; onReset: () => void }) {
-  const [tab, setTab] = useState<"home" | "report" | "track" | "village">("home");
+  const [tab, setTab] = useState<"home" | "report" | "track" | "village">(() => (new URLSearchParams(window.location.search).get("tab") === "report" ? "report" : "home"));
   const [home, setHome] = useState<any>(null);
-  const [queued, setQueued] = useState<number>(() => readQueue().length);
-  const reload = useCallback(() => api(`/api/citizen/home?household_id=${saved.household}`, { auth: false }).then(setHome).catch(() => {}), [saved.household]);
+  const [queued, setQueued] = useState(0);
+  const [stale, setStale] = useState<string | null>(null);
+  const recount = useCallback(() => pendingCount().then(setQueued), []);
+  // the last answer is kept on the phone, so without network the app still shows what was last known
+  const HKEY = `jalsakhi.citizen.home.${saved.household}`;
+  const reload = useCallback(() => api(`/api/citizen/home?household_id=${saved.household}`, { auth: false })
+    .then((h) => { setHome(h); setStale(null); try { localStorage.setItem(HKEY, JSON.stringify({ at: new Date().toISOString(), h })); } catch { /* full: fine */ } })
+    .catch(() => {
+      try {
+        const c = JSON.parse(localStorage.getItem(HKEY) || "null");
+        if (c) { setHome((x: any) => x || c.h); setStale(c.h.clock?.time || ""); }
+      } catch { /* nothing cached */ }
+    }), [saved.household, HKEY]);
   useEffect(() => { reload(); const id = setInterval(reload, 3000); return () => clearInterval(id); }, [reload]);
 
-  // offline queue: retry whenever we come back online, and every few seconds
+  // offline queue (photos included): retry whenever we come back online, and every few seconds
   useEffect(() => {
     const flush = async () => {
-      const q = readQueue();
-      if (!q.length) return;
-      const rest: any[] = [];
-      for (const item of q) {
-        try { const fd = new FormData(); Object.entries(item).forEach(([k, v]) => fd.append(k, String(v))); await api("/api/complaints", { form: fd, auth: false }); }
-        catch (e: any) { if (e instanceof TypeError) rest.push(item); }
-      }
-      localStorage.setItem(QKEY, JSON.stringify(rest));
-      setQueued(rest.length);
-      if (rest.length < q.length) { toast(t("sent")); reload(); }
+      if (!(await pendingCount())) return setQueued(0);
+      const sent = await flushReports();
+      recount();
+      if (sent > 0) { toast(t("sent")); reload(); }
     };
+    migrateLegacyQueue(REPORT_URL()).then(flush);
     const id = setInterval(flush, 6000);
     window.addEventListener("online", flush);
     return () => { clearInterval(id); window.removeEventListener("online", flush); };
-  }, [reload, t]);
+  }, [reload, t, recount]);
 
   if (!home) return <div className="phone"><div className="loader" style={{ flex: 1 }}><Drop className="drop" /></div></div>;
   const TABS: [typeof tab, any, string][] = [["home", Home, t("tab_home")], ["report", MessageSquare, t("tab_report")], ["track", ListChecks, t("tab_track")], ["village", Users, t("tab_village")]];
   return (
     <div className="phone">
-      {tab === "home" && <HomeTab home={home} t={t} lang={lang} goReport={() => setTab("report")} onReset={onReset} reload={reload} queued={queued} />}
-      {tab === "report" && <ReportTab home={home} t={t} lang={lang} onQueued={() => setQueued(readQueue().length)} onDone={reload} goTrack={() => setTab("track")} />}
+      {tab === "home" && <HomeTab home={home} t={t} lang={lang} goReport={() => setTab("report")} onReset={onReset} reload={reload} queued={queued} stale={stale} />}
+      {tab === "report" && <ReportTab home={home} t={t} lang={lang} onQueued={recount} onDone={reload} goTrack={() => setTab("track")} />}
       {tab === "track" && <TrackTab home={home} t={t} reload={reload} />}
       {tab === "village" && <VillageTab home={home} t={t} />}
       <nav className="tabs">{TABS.map(([k, Icon, label]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}><Icon />{label}</button>)}</nav>
     </div>
   );
 }
-const readQueue = (): any[] => { try { return JSON.parse(localStorage.getItem(QKEY) || "[]"); } catch { return []; } };
 
 function Top({ home, cls = "", children }: { home: any; cls?: string; children: React.ReactNode }) {
   return (
@@ -135,7 +141,7 @@ function TapArt({ state, fill }: { state: string; fill: number }) {
 }
 
 // ------------------------------------------------------------------- home tab
-function HomeTab({ home, t, lang, goReport, onReset, reload, queued }: any) {
+function HomeTab({ home, t, lang, goReport, onReset, reload, queued, stale }: any) {
   const s = home.supply;
   const st = s.state;
   const [pulse, setPulse] = useState<boolean | null>(home.pulse_today);
@@ -169,6 +175,7 @@ function HomeTab({ home, t, lang, goReport, onReset, reload, queued }: any) {
         </div>
       </Top>
       <div className="c-body">
+        {stale !== null && <div className="note warn"><CloudOff /><span>{t("offline_view", { t: stale })}</span></div>}
         {queued > 0 && <div className="note warn"><CloudOff /><span>{t("pending", { n: queued })}</span></div>}
         <div className="c-card">
           <div className="row between"><b>{t("today")}</b><span className="muted sm">{t("goal")}</span></div>
@@ -194,6 +201,8 @@ function HomeTab({ home, t, lang, goReport, onReset, reload, queued }: any) {
               <span className="muted num xs" style={{ width: 38, paddingTop: 2 }}>{hhmm(a.ts)}</span><span className="grow">{t(`n_${a.kind}`, a.params || {})}</span>
             </div>))}
         </div>
+        <PhoneAlerts household={home.household.id} t={t} lang={lang} />
+        <InstallCard t={t} />
         <Charge c={home.charges} t={t} lang={lang} />
         <div className="c-card sm ink2"><b style={{ color: "var(--ink)" }}>{t("sms")}</b><div className="mono" style={{ marginTop: 5 }}>JAL {home.household.id} NOWATER</div>
           <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={onReset}><Languages />{t("change")}</button></div>
@@ -235,18 +244,19 @@ function ReportTab({ home, t, lang, onQueued, onDone, goTrack }: any) {
   const pick = (f: File | null) => { setPhoto(f); setPreview(f ? URL.createObjectURL(f) : ""); };
   const send = async () => {
     setBusy(true);
-    const fields: any = { household_id: home.household.id, description: text, language: lang, channel: "app", consent: "true", geo_source: geo ? "device-gps" : "registered-tap-location" };
+    const fields: Record<string, string> = { household_id: home.household.id, description: text, language: lang, channel: "app", consent: "true", geo_source: geo ? "device-gps" : "registered-tap-location" };
     if (cat) fields.category = cat;
-    if (geo) { fields.lat = geo.lat; fields.lon = geo.lon; }
+    if (geo) { fields.lat = String(geo.lat); fields.lon = String(geo.lon); }
+    const small = photo ? await shrinkPhoto(photo) : null;
     try {
       const fd = new FormData();
-      Object.entries(fields).forEach(([k, v]) => fd.append(k, String(v)));
-      if (photo) fd.append("photo", photo);
+      Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
+      if (small) fd.append("photo", small, "photo.jpg");
       const r = await api("/api/complaints", { form: fd, auth: false });
       setDone(r); onDone();
     } catch (e: any) {
-      if (e instanceof TypeError) { // network down: keep it on the phone and retry later (photo is not queued)
-        localStorage.setItem(QKEY, JSON.stringify([...readQueue(), fields])); onQueued(); setDone({ offline: true });
+      if (e instanceof TypeError) { // network down: keep it on the phone, photo and all, and send it when the network returns
+        await queueReport(REPORT_URL(), fields, small); onQueued(); setDone({ offline: true });
       } else toast(e.message, true);
     }
     setBusy(false);
@@ -372,6 +382,58 @@ function VillageTab({ home, t }: any) {
         </>}
       </div>
     </>
+  );
+}
+
+/** Link this household's alerts to Telegram or WhatsApp, so they arrive when the app is closed. */
+function PhoneAlerts({ household, t, lang }: { household: string; t: any; lang: Lang }) {
+  const [st, setSt] = useState<any>(null);
+  const [link, setLink] = useState<any>(null);
+  const load = useCallback(() => api(`/api/citizen/alerts?household_id=${household}`, { auth: false }).then(setSt).catch(() => {}), [household]);
+  useEffect(() => { load(); const id = setInterval(load, 8000); return () => clearInterval(id); }, [load]);
+  if (!st) return null;
+  const make = async () => {
+    try {
+      const r = await api("/api/citizen/alerts/link", { body: { household_id: household, lang }, auth: false });
+      setLink(r);
+      if (r.telegram) window.open(r.telegram.url, "_blank", "noopener");
+      else if (r.whatsapp) window.open(r.whatsapp.url, "_blank", "noopener");
+    } catch (e: any) { toast(e.message, true); }
+  };
+  const on = st.linked.map((x: any) => (x.channel === "telegram" ? "Telegram" : x.channel === "whatsapp" ? "WhatsApp" : "SMS")).join(", ");
+  return (
+    <div className="c-card">
+      <div className="row" style={{ marginBottom: 6 }}><Smartphone size={17} color="var(--brand)" style={{ flex: "none" }} /><b>{t("ph_title")}</b></div>
+      {on ? <div className="pill good" style={{ whiteSpace: "normal" }}><CheckCircle2 />{t("ph_on", { c: on })}</div> : <p className="sm ink2">{t("ph_body")}</p>}
+      {!on && <button className="btn sm" style={{ marginTop: 10 }} onClick={make}><BellRing />{t("ph_btn")}</button>}
+      {link && !on && <div className="row wrap" style={{ marginTop: 10, gap: 8 }}>
+        {link.telegram && <a className="btn ghost sm" href={link.telegram.url} target="_blank" rel="noreferrer"><Send />{t("ph_open_tg")}</a>}
+        {link.whatsapp && <a className="btn ghost sm" href={link.whatsapp.url} target="_blank" rel="noreferrer"><MessageCircle />{t("ph_open_wa")}</a>}
+        {!link.live && <span className="xs muted">{t("ph_off", { c: link.code })}</span>}
+      </div>}
+    </div>
+  );
+}
+
+/** Offer installation where the browser allows it; an installed app opens without network. */
+function InstallCard({ t }: { t: any }) {
+  const [can, setCan] = useState<boolean>(() => !!(window as any).__installPrompt);
+  useEffect(() => { const h = () => setCan(true); window.addEventListener("jalsakhi:installable", h); return () => window.removeEventListener("jalsakhi:installable", h); }, []);
+  if (!can || window.matchMedia("(display-mode: standalone)").matches) return null;
+  const install = async () => {
+    const e = (window as any).__installPrompt;
+    if (!e) return;
+    e.prompt();
+    await e.userChoice.catch(() => null);
+    (window as any).__installPrompt = null;
+    setCan(false);
+  };
+  return (
+    <div className="c-card row" style={{ alignItems: "flex-start", gap: 12 }}>
+      <img src="/icons/icon-192.png" alt="" width={44} height={44} style={{ borderRadius: 11, flex: "none" }} />
+      <div className="grow"><b>{t("inst_title")}</b><p className="sm ink2" style={{ marginTop: 3 }}>{t("inst_body")}</p>
+        <button className="btn sm" style={{ marginTop: 9 }} onClick={install}><Download />{t("inst_btn")}</button></div>
+    </div>
   );
 }
 
