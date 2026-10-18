@@ -224,7 +224,7 @@ class _Tx:
 
 
 _JSON_COLS = {"scheme", "external_ids", "meta", "metrics", "affected_ids", "evidence", "priority_breakdown", "data",
-              "payload", "params"}
+              "payload", "params", "buttons", "acting"}
 
 
 def _enc(v):

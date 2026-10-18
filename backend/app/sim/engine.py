@@ -18,6 +18,7 @@ import numpy as np
 from .. import config as C
 from .. import seed as S
 from ..core import analytics
+from ..core.alerts import AlertDispatcher
 from ..core.complaints import ComplaintService
 from ..core.incidents import IncidentManager
 from ..core.monitor import DRY, IDLE, LOW, OK, STATUS_NAME, UNKNOWN, VillageMonitor
@@ -77,12 +78,14 @@ class Platform:
         self.version = 0
         self.started_wall = time.time()
         self.hw_home: str | None = HW_HOME
+        self.alerts = AlertDispatcher(self)  # outlives resets: a linked phone stays linked
         self.reset()
 
     # ------------------------------------------------------------------ reset
     def reset(self, ambient: bool = True):
         with self.lock:
             self.db.wipe()
+            self.alerts.new_epoch()
             self.__dict__.pop("_memo", None)
             if C.UPLOAD_DIR.exists():
                 shutil.rmtree(C.UPLOAD_DIR, ignore_errors=True)
@@ -215,10 +218,14 @@ class Platform:
         return out[:limit]
 
     def notify(self, village_id: str, kind: str, params: dict, *, branch_id=None, household_id=None, incident_id=None,
-               channel: str = "app"):
-        self.db.insert("notifications", {"village_id": village_id, "branch_id": branch_id, "household_id": household_id,
-                                         "kind": kind, "params": params, "ts": self.now.isoformat(timespec="seconds"),
-                                         "channel": channel, "incident_id": incident_id})
+               channel: str = "app", phone: bool = True):
+        """A message for households in the citizen app; `phone` also sends it to those who linked a phone."""
+        nid = self.db.insert("notifications", {"village_id": village_id, "branch_id": branch_id, "household_id": household_id,
+                                               "kind": kind, "params": params, "ts": self.now.isoformat(timespec="seconds"),
+                                               "channel": channel, "incident_id": incident_id})
+        if phone:
+            self.alerts.notified(nid, village_id, kind, params, branch_id=branch_id, household_id=household_id,
+                                 incident_id=incident_id)
 
     def notify_incident(self, inc: dict, kind: str):
         """Tell affected households, in plain terms, when something that touches their water is detected."""

@@ -4,6 +4,7 @@ Run from backend/:  python -m pytest -q
 The simulator is stepped manually (no wall-clock waiting), so runs are deterministic.
 """
 import os
+import re
 import tempfile
 
 import pytest
@@ -16,6 +17,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app import config as C  # noqa: E402
 from app import main  # noqa: E402
+from app.core import alert_text  # noqa: E402
 
 PW = "VLG-PW"
 
@@ -566,3 +568,223 @@ def test_scheme_exports_for_other_systems(client, admin):
     lines = csv.text.strip().splitlines()
     assert csv.headers["content-type"].startswith("text/csv") and lines[0].startswith("day,functional_pct") and len(lines) >= 31
     assert client.get(f"/api/villages/{PW}/export.geojson").status_code == 401
+
+
+# ---------------------------------------------------------------- phone alerts
+class FakeChannel:
+    """Stands in for a messaging provider: records what would have reached each phone."""
+    label = "Telegram"
+    configured = True
+    username = "jalsakhi_test_bot"
+    number = ""
+    error = None
+
+    def __init__(self, id_="telegram"):
+        self.id = id_
+        self.sent = []
+
+    def send(self, address, text, buttons):
+        self.sent.append({"to": address, "text": text, "buttons": buttons})
+        return f"m{len(self.sent)}"
+
+    def status(self):
+        return {"id": self.id, "label": self.label, "configured": True, "live": True, "identity": f"@{self.username}",
+                "error": None, "two_way": True, "setup": ""}
+
+    def to(self, address):
+        return [m for m in self.sent if m["to"] == address]
+
+
+@pytest.fixture()
+def phone(admin):
+    """A Telegram that records instead of sending, and `say(chat, text, **inbound)` to talk to the bot as a phone."""
+    from app.core.alerts import Inbound
+    A = main.P.alerts
+    A.stop()  # deliver here, in step with the test, not from the background sender
+    real, fake = A.channels["telegram"], FakeChannel()
+    A.channels["telegram"] = fake
+
+    def say(chat, text="", **kw):
+        A.handle(Inbound("telegram", chat, "Tester", text=text, **kw))
+        A.deliver_due()
+        got = fake.to(chat)
+        return got[-1]["text"] if got else None
+
+    yield fake, say
+    A.channels["telegram"] = real
+    A.start()
+
+
+def test_alerts_climb_the_escalation_ladder_in_sandbox(client, admin):
+    scenario(client, admin, "branch_interruption")
+    steps(10)
+    inc = pw_incidents(client, admin, "SUPPLY_INTERRUPTION")[0]
+    url = f"/api/incidents/{inc['id']}"
+    sent = client.get(url, headers=admin).json()["deliveries"]
+    roles = {d["role"] for d in sent}
+    assert {"operator", "vwsc"} <= roles and ("block" in roles) == (inc["severity"] == "critical")
+    assert all(d["status"] == "sandbox" for d in sent)  # the seeded numbers are placeholders: shown, never sent
+    client.patch(url, headers=admin, json={"action": "escalate", "note": "repair crew needed"})
+    assert "block" in {d["role"] for d in client.get(url, headers=admin).json()["deliveries"]}
+    state = client.get("/api/alerts/delivery", headers=admin).json()
+    assert {c["id"] for c in state["channels"]} == {"telegram", "whatsapp", "sms"}
+    assert any(r["address"].startswith("DEMO") for r in state["recipients"])
+
+
+def test_alerts_operator_links_a_phone_and_acknowledges_from_it(client, admin, phone):
+    fake, say = phone
+    op = login(client, "naljal.mitra")
+    opts = client.get("/api/alerts/delivery", headers=op).json()["options"]
+    assert {(o["role"], o["scope_id"]) for o in opts} == {("operator", PW), ("vwsc", PW)}  # an operator's jurisdiction is one village
+    assert client.post("/api/alerts/link", headers=op, json={"role": "block", "scope_id": "BK-MUL"}).status_code == 403
+    link = client.post("/api/alerts/link", headers=op, json={"role": "operator", "scope_id": PW}).json()
+    assert link["telegram"]["url"] == f"https://t.me/jalsakhi_test_bot?start={link['code']}"
+    assert "linked as" in say("7001", f"/start {link['code']}")
+    assert "expired" in say("7002", f"/start {link['code']}")  # a code links one phone only
+
+    scenario(client, admin, "branch_interruption")
+    steps(10)
+    main.P.alerts.deliver_due()
+    inc = pw_incidents(client, admin, "SUPPLY_INTERRUPTION")[0]
+    alert = next(m for m in fake.to("7001") if inc["id"] in m["text"])
+    assert alert["buttons"][0][0][1] == f"ack:{inc['id']}" and "(demo data)" in alert["text"]
+    assert "acknowledged" in say("7001", button=f"ack:{inc['id']}")
+    d = client.get(f"/api/incidents/{inc['id']}", headers=admin).json()
+    assert d["status"] == "acknowledged" and any("via Telegram" in (e["actor"] or "") for e in d["events"])
+    assert inc["id"] in say("7001", "/status")
+    assert "not an open incident" in say("7001", "ACK INC-9999")
+    say("7001", "STOP")
+    assert "Welcome" in say("7001", "hello")  # unlinked now
+
+
+def test_alerts_household_reports_with_photo_and_location_then_confirms_the_fix(client, admin, phone):
+    fake, say = phone
+    link = client.post("/api/citizen/alerts/link", json={"household_id": "PW-HH-045", "lang": "mr"}).json()
+    assert "STATUS" in say("8001", f"/start {link['code']}")
+    assert client.get("/api/citizen/alerts?household_id=PW-HH-045").json()["linked"][0]["channel"] == "telegram"
+    steps(8)
+    assert "HH-045" in say("8001", "STATUS")
+
+    say("8001", photo=lambda: b"\xff\xd8\xff\xe0" + b"0" * 64, lat=18.5049, lon=73.5183)
+    assert fake.to("8001")[-1]["buttons"][0][0][1] == "cat:no_water"  # asks what the problem is, with buttons
+    cid = re.search(r"JS-PW-\d+", say("8001", button="cat:leakage")).group(0)
+    c = main.P.db.one("SELECT * FROM complaints WHERE id=?", (cid,))
+    assert c["channel"] == "telegram" and c["category"] == "leakage" and c["photo"].startswith("/uploads/")
+    assert abs(c["lat"] - 18.5049) < 1e-9 and c["geo_source"] == "telegram-location"
+    assert (C.UPLOAD_DIR / c["photo"].rsplit("/", 1)[1]).exists()
+
+    scenario(client, admin, "branch_interruption")  # PW-HH-045 is on the lane that loses supply
+    steps(10)
+    main.P.alerts.deliver_due()
+    assert any("पाणीपुरवठा" in m["text"] for m in fake.to("8001"))  # the lane alert, in the household's language
+    cid = re.search(r"JS-PW-\d+", say("8001", button="cat:no_water")).group(0)
+    inc = pw_incidents(client, admin, "SUPPLY_INTERRUPTION")[0]
+    client.patch(f"/api/incidents/{inc['id']}", headers=admin, json={"action": "repair", "note": "Valve reopened"})
+    main.P.alerts.deliver_due()
+    ask = fake.to("8001")[-1]
+    assert ask["buttons"][0][0][1] == "fix:yes" and "YES" in ask["text"]
+    say("8001", button="fix:yes")
+    assert main.P.db.one("SELECT citizen_confirmed FROM complaints WHERE id=?", (cid,))["citizen_confirmed"] == 1
+    assert say("8001", "होय") == alert_text.t("mr", "none_pending")  # nothing else is waiting for confirmation
+    say("8001", "STOP")
+
+
+def test_whatsapp_webhook_takes_a_report_and_answers_in_sandbox(client, admin):
+    body = {"entry": [{"changes": [{"value": {
+        "contacts": [{"wa_id": "919800000001", "profile": {"name": "Sunita"}}],
+        "messages": [{"from": "919800000001", "type": "text", "text": {"body": "JAL PW-HH-030 pipe se pani beh raha hai"}}]}}]}]}
+    assert client.post("/api/whatsapp/webhook", json=body).json()["received"] == 1
+    log = client.get("/api/alerts/delivery", headers=admin).json()["log"]
+    assert any(x["direction"] == "in" and x["channel"] == "whatsapp" for x in log)
+    reply = next(x for x in log if x["direction"] == "out" and x["channel"] == "whatsapp")
+    assert "JS-PW-" in reply["text"] and reply["status"] == "sandbox"  # not configured here: logged, never claimed as sent
+    assert main.P.db.one("SELECT channel FROM complaints WHERE household_id='PW-HH-030' ORDER BY seq DESC")["channel"] == "whatsapp"
+    assert client.get("/api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=x&hub.challenge=1").status_code == 403
+
+
+def test_alerts_are_deduplicated_validated_and_rate_limited(client, admin):
+    A = main.P.alerts
+    bad = client.post("/api/alerts/recipients", headers=admin, json={"role": "operator", "scope_id": PW, "channel": "sms", "address": "123"})
+    assert bad.status_code == 422
+    r = client.post("/api/alerts/recipients", headers=admin, json={"name": "Rate test", "role": "operator", "scope_id": PW,
+                                                                     "channel": "sms", "address": "98765 43210"}).json()
+    assert r["address"] == "+91 ••••• 3210"
+    rec = A.recipient(r["id"])
+    assert A._send(rec, "x", "hello", village_id=PW) and A._send(rec, "x", "hello", village_id=PW) is None
+    real, A.channels["sms"] = A.channels["sms"], FakeChannel("sms")
+    try:
+        got = [client.post(f"/api/alerts/recipients/{r['id']}/test", headers=admin).json()["status"] for _ in range(C.ALERT_RATE[0] + 2)]
+    finally:
+        A.channels["sms"] = real
+    assert got[0] == "queued" and got[-1] == "held"
+    assert client.delete(f"/api/alerts/recipients/{r['id']}", headers=admin).json()["removed"] == r["id"]
+
+
+# ------------------------------------------------------------- interoperability
+DEV = {"X-Device-Key": C.DEVICE_KEY}
+
+
+def test_ministry_device_format_in_and_out(client, admin):
+    msg = {"gid": "MH_PUN_MUL_PW", "did": "b1-in", "dty": "fm", "dt": "2026-10-05T06:12:00", "p": {"f": "42.5", "pr": "1.21", "b": "88", "e": "00"}}
+    r = client.post("/api/telemetry/ddws", json=msg, headers=DEV).json()
+    assert r["accepted"] == 1 and r["results"][0]["metrics"] == {"flow_lpm": 42.5, "pressure_bar": 1.21}
+    ev = next(x for x in client.get("/api/telemetry/events?device=PW-B1-IN", headers=admin).json() if x["event_id"].startswith("ddws:"))
+    assert ev["ts"].endswith("+05:30") and ev["source"] == "hardware"  # the report's timestamps carry no offset: read as IST
+    again = client.post("/api/telemetry/ddws", json={"messages": [msg]}, headers=DEV).json()
+    assert again["results"][0]["duplicate"] is True
+    bad = client.post("/api/telemetry/ddws", headers=DEV, json=[
+        {**msg, "dty": "sl"}, {**msg, "gid": "XX_1"}, {**msg, "p": {"f": "lots"}}, {**msg, "p": {"pr": "40"}}]).json()
+    errors = [x["error"] for x in bad["results"]]
+    assert bad["accepted"] == 0 and "registered as type 'fm'" in errors[0] and "unknown gateway" in errors[1]
+    assert "must be a number" in errors[2] and "outside plausible range" in errors[3]
+    assert client.post("/api/telemetry/ddws", json=msg).status_code == 401
+
+    steps(3)
+    out = client.get(f"/api/interop/ddws/{PW}", headers=admin).json()
+    assert out["gid"] == "MH_PUN_MUL_PW" and "March 2021" in out["source"]
+    by = {m["did"]: m for m in out["messages"]}
+    assert by["tank"]["dty"] == "sl" and by["src"]["dty"] == "gl" and by["wq1"]["dty"] == "ca" and by["main"]["dty"] == "fm"
+    assert all(isinstance(v, str) for v in by["tank"]["p"].values()) and by["tank"]["p"]["e"] == "00"  # values as strings, as in the report
+    back = client.post("/api/telemetry/ddws", json=by["tank"], headers=DEV).json()  # what we publish, we can read
+    assert back["accepted"] == 1 and set(back["results"][0]["metrics"]) == {"level_pct", "volume_l"}
+
+
+def test_every_outbox_record_is_shaped_for_its_platform(client, admin):
+    steps(6)
+    c = client.post("/api/complaints", data={"household_id": "PW-HH-021", "category": "leakage"}).json()
+    rows = client.get("/api/sync", headers=admin).json()["outbox"]
+    g = next(r for r in rows if r["record_type"] == "grievance" and r["entity_id"] == c["id"])
+    sg = next(t for t in g["payload"]["targets"] if t["system"].startswith("Sujal Gaon"))
+    assert sg["body"]["grievance_ref"] == c["id"] and sg["body"]["sujal_gaon_id"].startswith("DEMO-SG-") and sg["body"]["category"] == "leakage"
+    assert sg["field_names"].startswith("draft")
+    m = client.get("/api/sync/mapping", headers=admin).json()
+    systems = {p["system"] for p in m["platforms"]}
+    assert {"JJM IMIS", "WQMIS"} <= systems and all(f["basis"].startswith("draft") for p in m["platforms"] for r in p["records"] for f in r["fields"])
+    assert {k["key"] for k in m["ddws"]["keys"]} >= {"t", "f", "b", "e"}
+
+
+def test_wqmis_lab_result_closes_the_loop(client, admin):
+    scenario(client, admin, "quality_turbidity")
+    steps(14)
+    inc = pw_incidents(client, admin, "QUALITY_VERIFY")[0]
+    ftk = client.post("/api/quality/tests", headers=admin, json={
+        "village_id": PW, "sample_point": "Tank outlet", "kind": "FTK", "incident_id": inc["id"],
+        "params": {"turbidity_ntu": 9.1, "chlorine_mgl": 0.3, "ph": 7.1, "h2s_positive": True}}).json()
+    assert ftk["result"] == "fail" and ftk["lab_status"] == "requested"
+    lab = client.post(f"/api/quality/wqmis/pull?village={PW}", headers=admin).json()["imported"][0]
+    assert lab["kind"] == "LAB" and lab["referral"] == ftk["id"] and lab["result"] == "fail"  # the water is still turbid
+    assert any("coliform" in f for f in lab["failed_checks"])
+    d = client.get(f"/api/incidents/{inc['id']}", headers=admin).json()
+    assert d["evidence"]["lab_pass"] is False and any(e["role"] == "lab" for e in d["events"])
+    assert "laboratory" in d["closure"]["missing"]
+    assert client.post(f"/api/quality/wqmis/pull?village={PW}", headers=admin).json()["imported"] == []  # the referral is answered
+
+    ok = client.post("/api/quality/lab-results", headers=admin, json={"results": [{
+        "sample_id": ftk["id"], "lab": "District lab, Pune", "params": {"turbidity_ntu": 0.6, "ph": 7.3, "tds_mgl": 330,
+                                                                       "e_coli_present": False, "total_coliform_present": False}}]}).json()
+    assert ok["imported"][0]["result"] == "pass"
+    assert client.get(f"/api/incidents/{inc['id']}", headers=admin).json()["evidence"]["lab_pass"] is True
+    notes = client.get("/api/citizen/notifications?household_id=PW-HH-014").json()
+    assert notes[0]["kind"] == "advisory_cleared" and any(n["kind"] == "advisory_quality" for n in notes)
+    unknown = client.post("/api/quality/lab-results", headers=admin, json={"results": [{"sample_id": "WQ-9999", "params": {}}]}).json()
+    assert "no JalSakhi test" in unknown["imported"][0]["error"]

@@ -12,6 +12,7 @@ import random
 import time
 
 from ..seed import external_ids, village_by_id
+from .interop import target_payloads
 
 SCHEMA_VERSION = "jalsakhi.sync/0.3"
 MAX_PER_PASS = 6
@@ -68,6 +69,7 @@ class SyncService:
                     "ids": external_ids(village_by_id(village_id)), "internal_id": entity_id,
                     "generated_at": self.ctx.now.isoformat(timespec="seconds"),
                     "source_system": "JalSakhi AI (PoC, simulated data)", "data": payload}
+        envelope["targets"] = target_payloads(record_type, envelope)  # the body each JJM platform would receive
         self.db.insert("sync_outbox", {"idem_key": idem, "record_type": record_type, "entity_id": entity_id,
                                        "village_id": village_id, "op": op, "payload": envelope, "status": "queued",
                                        "attempts": 0, "next_attempt": 0.0,

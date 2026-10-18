@@ -89,7 +89,8 @@ class ComplaintService:
         ctx.feed("complaint", "info", f"{c['id']} {LABEL[category]} reported by {hh['label']} ({how} {inc['id']})",
                  hh["village_id"], inc["id"])
         ctx.notify(hh["village_id"], "complaint_received", {"id": c["id"], "category": category},
-                   household_id=hh["id"], incident_id=inc["id"])
+                   household_id=hh["id"], incident_id=inc["id"],  # a chat report is answered in the chat itself
+                   phone=c["source"] != "simulated-citizen" and c["channel"] not in ("telegram", "whatsapp"))
         ctx.sync.enqueue("grievance", c["id"], hh["village_id"], "create", {
             "tracking_id": c["id"], "category": category, "status": c["status"], "channel": c["channel"],
             "fhtc_id": hh["fhtc_ext_id"], "linked_incident": inc["id"], "created_at": c["created_at"],
@@ -202,6 +203,7 @@ class ComplaintService:
                 if inc["status"] == "resolved_pending_verification":
                     ctx.incidents.act(inc["id"], "reopen", {"name": "citizen feedback", "role": "citizen"},
                                       {"note": f"Reopened: {c['household_id']} reports the problem persists"})
+                    ctx.alerts.reopened(inc, ctx.households[c["household_id"]]["label"])
             ctx.incidents._persist(inc)
         elif not resolved and c["incident_id"]:
             ctx.incidents.act(c["incident_id"], "reopen", {"name": "citizen feedback", "role": "citizen"},

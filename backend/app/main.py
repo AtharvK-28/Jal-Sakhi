@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -18,15 +19,17 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import config as C
 from . import seed as S
 from .core import analytics, planner
+from .core import interop
+from .core.alerts import ROLE_TITLE as ALERT_ROLE_TITLE
 from .core.complaints import ComplaintError, LABEL as COMPLAINT_LABEL
 from .core.incidents import IncidentError, TYPES as INCIDENT_TYPES
 from .core.monitor import STATUS_NAME
@@ -152,8 +155,10 @@ async def lifespan(_app: FastAPI):
     if os.environ.get("JALSAKHI_PAUSED"):  # tests step the clock themselves
         P.running = False
     task = asyncio.create_task(ticker())
+    P.alerts.start()
     log.info("JalSakhi AI ready: %d villages, %d households (simulated)", len(P.sims), len(P.households))
     yield
+    P.alerts.stop()
     task.cancel()
 
 
@@ -490,6 +495,89 @@ def post_telemetry(ev: TelemetryEvent, x_device_key: str | None = Header(default
     return {"stored": True, "event_id": ev.event_id, "device_id": ev.device_id, "source": ev.source}
 
 
+class AlertLinkBody(BaseModel):
+    household_id: str
+    lang: str = "en"
+
+
+@app.post("/api/citizen/alerts/link")
+def citizen_alert_link(body: AlertLinkBody):
+    """A one-time code that links the phone it is opened on to this household's alerts."""
+    hh = P.households.get(body.household_id.strip().upper())
+    if hh is None:
+        raise HTTPException(404, "household not found")
+    lang = body.lang if body.lang in C.LANGUAGES else S.village_by_id(hh["village_id"])["lang"]
+    return {**P.alerts.issue_link(role="household", scope_id=hh["id"], name=hh["label"], lang=lang),
+            "linked": P.alerts.household_links(hh["id"])}
+
+
+@app.get("/api/citizen/alerts")
+def citizen_alerts(household_id: str):
+    hh = P.households.get(household_id.strip().upper())
+    if hh is None:
+        raise HTTPException(404, "household not found")
+    return {"linked": P.alerts.household_links(hh["id"]), "live": P.alerts.live}
+
+
+@app.get("/api/whatsapp/webhook", include_in_schema=False)
+def whatsapp_verify(request: Request):
+    """Meta calls this once with the verify token you chose, to confirm the webhook is yours."""
+    q = request.query_params
+    if C.WHATSAPP_VERIFY_TOKEN and q.get("hub.mode") == "subscribe" and hmac.compare_digest(
+            q.get("hub.verify_token") or "", C.WHATSAPP_VERIFY_TOKEN):
+        return PlainTextResponse(q.get("hub.challenge") or "")
+    raise HTTPException(403, "verification failed")
+
+
+@app.post("/api/whatsapp/webhook", include_in_schema=False)
+async def whatsapp_inbound(request: Request):
+    raw = await request.body()
+    if C.WHATSAPP_APP_SECRET:
+        want = "sha256=" + hmac.new(C.WHATSAPP_APP_SECRET.encode(), raw, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(request.headers.get("X-Hub-Signature-256", ""), want):
+            raise HTTPException(401, "bad signature")
+    try:
+        payload = json.loads(raw or b"{}")
+    except ValueError:
+        raise HTTPException(400, "not JSON")
+    n = await asyncio.to_thread(P.alerts.whatsapp_webhook, payload)
+    return {"received": n}
+
+
+@app.post("/api/telemetry/ddws", status_code=201)
+def post_telemetry_ddws(body: object = Body(...), x_device_key: str | None = Header(default=None)):
+    """Readings in the ministry's reference device format (DDWS roadmap, March 2021): one message, a list, or
+    {"messages": [...]}. Each is translated and then validated exactly like /api/telemetry."""
+    if x_device_key != C.DEVICE_KEY:
+        raise HTTPException(401, "missing or invalid X-Device-Key")
+    msgs = body.get("messages", [body]) if isinstance(body, dict) else body
+    if not isinstance(msgs, list) or not msgs or len(msgs) > 200:
+        raise HTTPException(422, "send one message, a list, or {\"messages\": [...]} with at most 200 messages")
+    out = []
+    with P.lock:
+        T = P.telemetry
+        for m in msgs:
+            try:
+                ev = interop.ddws_in(m if isinstance(m, dict) else {}, T.devices, P.now)
+                err = T.validate(ev)
+            except ValueError as exc:
+                err, ev = str(exc), None
+            if err:
+                T.rejected += 1
+                out.append({"did": m.get("did") if isinstance(m, dict) else None, "stored": False, "error": err})
+                continue
+            stored = T.accept(ev["device_id"], datetime.fromisoformat(ev["ts"]), ev["metrics"], event_id=ev["event_id"],
+                              source="hardware", quality=ev["quality"], received=P.now, tick=P.tick)
+            if "battery" in ev:
+                T.devices[ev["device_id"]]["battery"] = ev["battery"]
+            if stored and ev["device_id"] == HW_DEVICE:
+                P.hw_seen(ev["metrics"], ev["quality"])
+            out.append({"did": m["did"], "device_id": ev["device_id"], "stored": stored, "duplicate": not stored,
+                        "metrics": ev["metrics"], "quality": ev["quality"], "ignored": ev["ignored"]})
+        T.flush()
+    return {"accepted": sum(1 for r in out if r["stored"]), "results": out, "format": interop.DDWS_SOURCE}
+
+
 # ---------------------------------------------------------------------- staff
 @app.get("/api/stream")
 async def stream(request: Request, village: str | None = None, user=Depends(staff)):
@@ -693,6 +781,7 @@ def incident(incident_id: str, user=Depends(staff)):
     with P.lock:
         d = P.incidents.detail(incident_id.upper())
     need_village(user, d["village_id"])
+    d["deliveries"] = P.alerts.for_incident(d["id"])
     return _plain(d)
 
 
@@ -745,6 +834,104 @@ def ai_models(user=Depends(staff)):
     return P.models.card
 
 
+# --------------------------------------------------------------- phone alerts
+def _alert_options(user: dict) -> list[dict]:
+    """Which alert streams this user may put on a phone: every village, block and district in their jurisdiction."""
+    vids = scope_of(user)
+    out = []
+    for v in S.VILLAGES:
+        if v["id"] in vids:
+            out += [{"role": r, "scope_id": v["id"], "label": f"{ALERT_ROLE_TITLE[r]} · {v['name']}", "level": 1}
+                    for r in ("operator", "vwsc")]
+    paths = [S.admin_path(v) for v in S.VILLAGES]
+    for key, level in (("block", 2), ("district", 3)):
+        for uid, name in sorted({(p[f"{key}_id"], p[key]) for p in paths}):
+            if set(P.alerts.villages_of(uid)) <= vids:
+                out.append({"role": key, "scope_id": uid, "label": f"{ALERT_ROLE_TITLE[key]} · {name}", "level": level})
+    return out
+
+
+def _need_alert_option(user: dict, role: str, scope_id: str) -> dict:
+    opt = next((o for o in _alert_options(user) if o["role"] == role and o["scope_id"] == scope_id), None)
+    if opt is None:
+        raise HTTPException(403, "that alert stream is outside your jurisdiction")
+    return opt
+
+
+@app.get("/api/alerts/delivery")
+def alert_delivery(user=Depends(staff)):
+    return _plain({**P.alerts.state(scope_of(user)), "options": _alert_options(user), "languages": C.LANGUAGES})
+
+
+class StaffLinkBody(BaseModel):
+    role: str
+    scope_id: str
+
+
+@app.post("/api/alerts/link")
+def alert_link(body: StaffLinkBody, user=Depends(staff)):
+    """A one-time code that links a phone to an alert stream. Replies from that phone act as this user."""
+    opt = _need_alert_option(user, body.role, body.scope_id)
+    acting = {k: user[k] for k in ("username", "name", "role", "scope_level", "scope_id")}
+    P.audit.log(P.now, user["name"], user["role"], "alerts.link_code", "alert_stream", f"{body.role}:{body.scope_id}")
+    return P.alerts.issue_link(role=body.role, scope_id=body.scope_id, name=f"{user['name']} ({opt['label']})",
+                               lang="en", acting=acting)
+
+
+class RecipientBody(BaseModel):
+    name: str = Field(default="", max_length=80)
+    role: str
+    scope_id: str
+    channel: str
+    address: str = Field(max_length=40)
+    lang: str = "en"
+
+
+@app.post("/api/alerts/recipients", status_code=201)
+def alert_recipient_add(body: RecipientBody, user=Depends(staff)):
+    scope_id = body.scope_id
+    if body.role == "household":
+        hh = P.households.get(scope_id.strip().upper())
+        if hh is None:
+            raise HTTPException(404, "household not found")
+        need_village(user, hh["village_id"])
+        scope_id = hh["id"]
+    else:
+        _need_alert_option(user, body.role, scope_id)
+    try:
+        r = P.alerts.add_recipient(name=body.name, role=body.role, scope_id=scope_id, channel=body.channel,
+                                   address=body.address, lang=body.lang if body.lang in C.LANGUAGES else "en")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    P.audit.log(P.now, user["name"], user["role"], "alerts.recipient_add", "recipient", str(r["id"]), None, body.channel, r["name"])
+    return r
+
+
+def _own_recipient(user: dict, rid: int) -> dict:
+    r = P.alerts.recipient(rid)
+    if r is None or not r["active"]:
+        raise HTTPException(404, "recipient not found")
+    villages = P.alerts.villages_for(r)
+    if not villages or not set(villages) <= scope_of(user):
+        raise HTTPException(403, "that recipient is outside your jurisdiction")
+    return r
+
+
+@app.delete("/api/alerts/recipients/{rid}")
+def alert_recipient_remove(rid: int, user=Depends(staff)):
+    r = _own_recipient(user, rid)
+    P.alerts.remove_recipient(rid)
+    P.audit.log(P.now, user["name"], user["role"], "alerts.recipient_remove", "recipient", str(rid), None, None, r["name"])
+    return {"removed": rid}
+
+
+@app.post("/api/alerts/recipients/{rid}/test")
+def alert_recipient_test(rid: int, user=Depends(staff)):
+    r = _own_recipient(user, rid)
+    did = P.alerts.test(r)
+    return {"queued": did, "status": P.alerts.db.scalar("SELECT status FROM deliveries WHERE id=?", (did,))}
+
+
 # ------------------------------------------------------------- water quality
 def _judge_test(params: dict) -> tuple[str, list[str]]:
     L = C.QUALITY_LIMITS
@@ -786,8 +973,11 @@ def add_wq_test(body: WqTest, user=Depends(staff)):
         P.db.insert("wq_tests", row)
         inc = P.incidents.items.get(body.incident_id or "")
         if inc is not None:
-            inc["evidence"]["ftk_pass"] = result == "pass"
-            inc["evidence"]["ftk_at"] = row["ts"]
+            if body.kind == "LAB":
+                inc["evidence"]["lab_pass"] = result == "pass"
+            else:
+                inc["evidence"]["ftk_pass"] = result == "pass"
+                inc["evidence"]["ftk_at"] = row["ts"]
             inc["evidence"].setdefault("tests", []).append(row["id"])
             msg = (f"{body.kind} test {row['id']} at {body.sample_point}: PASS" if result == "pass"
                    else f"{body.kind} test {row['id']} at {body.sample_point}: FAIL ({'; '.join(fails)}). Laboratory confirmation requested.")
@@ -800,6 +990,78 @@ def add_wq_test(body: WqTest, user=Depends(staff)):
                        {**{k: row[k] for k in ("id", "sample_point", "kind", "params", "result", "ts", "lab_status")}, "target": "WQMIS (sandbox)"})
         P.version += 1
         return {**row, "failed_checks": fails}
+
+
+class LabResult(BaseModel):
+    sample_id: str  # the JalSakhi test whose failure sent the sample to the laboratory
+    lab: str = Field(default="District water testing laboratory", max_length=120)
+    tested_on: str | None = None
+    params: dict
+    remarks: str = Field(default="", max_length=300)
+
+
+class LabResults(BaseModel):
+    results: list[LabResult] = Field(min_length=1, max_length=100)
+
+
+def _lab_import(results: list[LabResult], user: dict, source: str) -> list[dict]:
+    """Laboratory results arriving from WQMIS: each closes the referral its FTK test opened."""
+    out = []
+    for res in results:
+        ref = P.db.one("SELECT * FROM wq_tests WHERE id=?", (res.sample_id.strip().upper(),))
+        if ref is None:
+            out.append({"sample_id": res.sample_id, "error": "no JalSakhi test with this sample_id"})
+            continue
+        need_village(user, ref["village_id"])
+        verdict, fails = interop.lab_verdict(res.params)
+        n = (P.db.scalar("SELECT COUNT(*) FROM wq_tests") or 0) + 1
+        row = {"id": f"WQ-{n:04d}", "village_id": ref["village_id"], "sample_point": ref["sample_point"], "kind": "LAB",
+               "params": res.params, "result": verdict, "tested_by": f"{res.lab} (via WQMIS)", "ts": res.tested_on or P.now.isoformat(timespec="seconds"),
+               "incident_id": ref["incident_id"], "lab_status": f"result for {ref['id']}", "note": res.remarks or None}
+        P.db.insert("wq_tests", row)
+        P.db.update("wq_tests", "id", ref["id"], {"lab_status": f"lab {verdict}: {row['id']}"})
+        inc = P.incidents.items.get(ref["incident_id"] or "")
+        if inc is not None:
+            inc["evidence"]["lab_pass"] = verdict == "pass"
+            inc["evidence"].setdefault("tests", []).append(row["id"])
+            P.incidents.add_event(inc, "wq_test", f"Laboratory result {row['id']} for sample {ref['id']} ({res.lab}): "
+                                  + ("within limits" if verdict == "pass" else "FAIL: " + "; ".join(fails)),
+                                  actor=f"{res.lab} via WQMIS", role="lab", data={"test_id": row["id"], "result": verdict})
+            P.incidents._persist(inc)
+        P.notify(ref["village_id"], "advisory_cleared" if verdict == "pass" else "advisory_quality",
+                 {"incident": ref["incident_id"]}, incident_id=ref["incident_id"], channel="app+sms")
+        P.audit.log(P.now, user["name"], user["role"], f"quality.lab_result.{source}", "wq_test", row["id"], ref["id"], verdict, res.lab)
+        P.feed("quality", "ok" if verdict == "pass" else "warn",
+               f"Lab result for {ref['id']} at {ref['sample_point']}: {'within limits' if verdict == 'pass' else 'FAIL'} ({source})",
+               ref["village_id"], ref["incident_id"])
+        out.append({**row, "failed_checks": fails, "referral": ref["id"]})
+    P.version += 1
+    return out
+
+
+@app.post("/api/quality/lab-results", status_code=201)
+def quality_lab_results(body: LabResults, user=Depends(staff)):
+    """WQMIS inbound: laboratory results for samples JalSakhi referred. Field names follow the draft WQMIS mapping."""
+    with P.lock:
+        return {"imported": _lab_import(body.results, user, "WQMIS import")}
+
+
+@app.post("/api/quality/wqmis/pull")
+def quality_wqmis_pull(village: str, user=Depends(staff)):
+    """DEMO: the sandbox laboratory answers every open referral in a village from the simulated water."""
+    need_village(user, village)
+    with P.lock:
+        pending = P.db.query("SELECT id FROM wq_tests WHERE village_id=? AND lab_status='requested' ORDER BY id", (village,))
+        if not pending:
+            return {"imported": [], "note": "no laboratory referrals are waiting in this village"}
+        sim, rnd = P.sims[village], P.cit_rng
+        dirty = sim.turb > 4 or sim.cl < 0.1 or not P._cit[village].get("cluster_fixed", True)
+        results = [LabResult(sample_id=r["id"], lab="District water testing laboratory (sandbox)", params={
+            "turbidity_ntu": round(max(0.1, sim.turb + rnd.uniform(-0.2, 0.2)), 1), "ph": round(7.2 + rnd.uniform(-0.2, 0.2), 1),
+            "tds_mgl": round(340 + rnd.uniform(-20, 20)), "chlorine_mgl": round(max(0.0, sim.cl), 2),
+            "e_coli_present": bool(dirty), "total_coliform_present": bool(dirty)},
+            remarks="DEMO: generated from the simulated water") for r in pending]
+        return {"imported": _lab_import(results, user, "WQMIS sandbox"), "demo": True}
 
 
 @app.get("/api/quality")
@@ -851,6 +1113,24 @@ def sync_state(user=Depends(staff)):
 
 class OutageBody(BaseModel):
     on: bool
+
+
+@app.get("/api/sync/mapping")
+def sync_mapping(user=Depends(staff)):
+    """Field-by-field mapping to each JJM platform, and the ministry's device message format."""
+    return {"platforms": interop.mapping_table(), "draft_note": interop.DRAFT,
+            "ddws": {"source": interop.DDWS_SOURCE, "types": [{"dty": k, "what": w, "basis": b} for k, (w, b) in interop.TYPE_DOC.items()],
+                     "keys": [{"key": k, "what": w, "unit": u, "basis": b} for k, (w, u, b) in interop.KEY_DOC.items()]}}
+
+
+@app.get("/api/interop/ddws/{village_id}")
+def interop_ddws(village_id: str, user=Depends(staff)):
+    """The village's latest readings as its gateway would forward them, in the ministry's reference format."""
+    need_village(user, village_id)
+    with P.lock:
+        T = P.telemetry
+        ids = P.monitors[village_id].device_ids + ([HW_DEVICE] if village_id == S.FOCUS_VILLAGE else [])
+        return _plain(interop.ddws_out(village_id, ids, T.devices, T.latest))
 
 
 @app.post("/api/sync/outage")
@@ -1222,6 +1502,10 @@ if C.FRONTEND_DIST.exists():
             raise HTTPException(404, "not found")
         target = (C.FRONTEND_DIST / path).resolve()
         if path and target.is_file() and Path(C.FRONTEND_DIST).resolve() in target.parents:
+            if path == "sw.js":  # a stale worker would keep serving an old app: always revalidate it
+                return FileResponse(target, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+            if path.endswith(".webmanifest"):
+                return FileResponse(target, media_type="application/manifest+json")
             return FileResponse(target)
         return FileResponse(C.FRONTEND_DIST / "index.html")
 else:

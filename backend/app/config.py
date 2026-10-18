@@ -98,6 +98,24 @@ TOKEN_TTL_HOURS = 12
 DEMO_PASSWORD = "jal123"
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
+# --------------------------------------------------------------------------
+# Phone alerts. A channel stays in sandbox (logged, never sent) until its credentials are set.
+# --------------------------------------------------------------------------
+ALERTS_DB = Path(os.environ.get("JALSAKHI_ALERTS_DB", DATA_DIR / "alerts.db"))  # survives a demo reset
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()  # from @BotFather
+WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()  # Meta WhatsApp Business Cloud API access token
+WHATSAPP_PHONE_ID = os.environ.get("WHATSAPP_PHONE_ID", "").strip()  # the sending number's phone-number ID
+WHATSAPP_NUMBER = os.environ.get("WHATSAPP_NUMBER", "").strip()  # that number as people dial it, for wa.me links
+WHATSAPP_VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN", "").strip()  # chosen by you; Meta echoes it to verify the webhook
+WHATSAPP_APP_SECRET = os.environ.get("WHATSAPP_APP_SECRET", "").strip()  # checks X-Hub-Signature-256 on inbound calls
+WHATSAPP_API_VERSION = os.environ.get("WHATSAPP_API_VERSION", "v21.0")
+SMS_GATEWAY_URL = os.environ.get("SMS_GATEWAY_URL", "").strip()  # receives {"to", "text", "sender", "dlt_template_id"}
+SMS_GATEWAY_AUTH = os.environ.get("SMS_GATEWAY_AUTH", "").strip()  # sent as the Authorization header
+SMS_SENDER_ID = os.environ.get("SMS_SENDER_ID", "").strip()  # DLT-registered header, required for SMS in India
+SMS_DLT_TEMPLATE_ID = os.environ.get("SMS_DLT_TEMPLATE_ID", "").strip()
+ALERT_RATE = (15, 600)  # at most this many messages to one phone in this many seconds; the rest are held
+LINK_CODE_TTL_S = 1800
+
 LANGUAGES = {
     "en": "English",
     "hi": "हिन्दी",

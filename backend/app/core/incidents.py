@@ -111,6 +111,7 @@ class IncidentManager:
         self.ctx.audit.log(now, "system", "system", "incident.create", "incident", inc["id"], None, "open", title)
         self.ctx.feed("incident", severity, f"{inc['id']} {title}", village_id, inc["id"])
         self.ctx.notify_incident(inc, "alert")
+        self.ctx.alerts.incident_opened(inc)
         self.ctx.sync.enqueue("incident", inc["id"], village_id, "create", self.public(inc))
         if origin != "citizen":
             self.ctx.complaints.absorb(inc)
@@ -218,6 +219,7 @@ class IncidentManager:
                         note=f"Escalated to level {inc['escalation_level']}" + (f": {note}" if note else ""))
             self.ctx.audit.log(self.ctx.now, actor, role, "incident.escalate", "incident", inc["id"],
                                str(inc["escalation_level"] - 1), str(inc["escalation_level"]))
+            self.ctx.alerts.escalated(inc, inc["escalation_level"], f"Escalated by {actor}" + (f": {note}" if note else "."))
         else:
             raise IncidentError(f"unknown action '{action}'")
         self._score(inc)
@@ -238,9 +240,12 @@ class IncidentManager:
             got.append(f"{ev['citizen_confirmed']} citizen confirmation(s)")
         if ev.get("ftk_pass"):
             got.append("FTK re-test passed")
+        if ev.get("lab_pass"):
+            got.append("laboratory result within limits (WQMIS)")
         if inc["category"] == "quality":
-            ok = bool(inc.get("recovered_at")) and bool(ev.get("ftk_pass"))
-            missing = "sensor readings back within limits AND a passing FTK re-test"
+            ok = bool(inc.get("recovered_at")) and bool(ev.get("ftk_pass") or ev.get("lab_pass")) and ev.get("lab_pass") is not False
+            missing = ("sensor readings back within limits AND a passing FTK re-test or laboratory result"
+                       + (" (the laboratory found the water outside the limits: a new sample must pass)" if ev.get("lab_pass") is False else ""))
         elif inc["type"] == "SUSPECTED_LEAK":
             tested = bool(ev.get("ftk_pass")) and (ev.get("ftk_at") or "") >= (inc.get("resolved_at") or "")
             ok = bool(inc.get("recovered_at")) and tested
@@ -345,12 +350,14 @@ class IncidentManager:
                 self._event(inc, "escalation", note="Not acknowledged within SLA; escalated to Block (level 2)")
                 self.ctx.feed("escalation", "warn", f"{inc['id']} escalated to Block: acknowledgement SLA missed",
                               inc["village_id"], inc["id"])
+                self.ctx.alerts.escalated(inc, 2, "Not acknowledged at village level within the SLA.")
                 self._dirty.add(inc["id"])
             if inc["escalation_level"] < 3 and now > datetime.fromisoformat(inc["sla_resolve_due"]):
                 inc["escalation_level"] = 3
                 self._event(inc, "escalation", note="Resolution SLA missed; escalated to District (level 3)")
                 self.ctx.feed("escalation", "warn", f"{inc['id']} escalated to District: resolution SLA missed",
                               inc["village_id"], inc["id"])
+                self.ctx.alerts.escalated(inc, 3, "Not resolved within the SLA.")
                 self._dirty.add(inc["id"])
         if self.ctx.tick % 10 == 0:
             for inc in self.items.values():
