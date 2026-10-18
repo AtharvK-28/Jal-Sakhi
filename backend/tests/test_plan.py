@@ -877,3 +877,54 @@ def test_a_failed_test_says_why_what_was_done_and_what_to_do(client, admin):
     assert client.get("/api/citizen/notifications?household_id=PW-HH-085").json()[0]["kind"] == "advisory_chemical"
     keys = [(a["key"], a["status"]) for a in r["advice"]]
     assert keys[0] == ("iron_mgl", "fail") and ("hardness_mgl", "caution") in keys  # failures first, then cautions
+
+
+# ------------------------------------------------- the problems a village actually has
+def test_a_suction_pump_on_a_tap_is_found_and_not_mistaken_for_a_leak(client, admin):
+    scenario(client, admin, "suction_pump")  # Tekdi Wasti
+    steps(12)
+    rows = pw_incidents(client, admin)
+    pump = next(i for i in rows if i["type"] == "SUSPECTED_BOOSTER")
+    assert pump["branch_id"] == "PW-B4" and pump["affected_count"] > 0 and pump["detection_delay_min"] is not None
+    assert not any(i["type"] in ("SUSPECTED_LEAK", "LOW_PRESSURE") and i["branch_id"] == "PW-B4" for i in rows)  # no leak hunt
+    d = client.get(f"/api/incidents/{pump['id']}", headers=admin).json()
+    assert d["evidence"]["ratio"] >= 2.2 and "Pani Samiti" in d["suggested_action"]
+
+
+def test_water_coming_back_tells_the_lane_to_run_the_tap_first(client, admin):
+    scenario(client, admin, "branch_interruption")  # Bazaar Peth
+    steps(10)
+    inc = pw_incidents(client, admin, "SUPPLY_INTERRUPTION")[0]
+    client.patch(f"/api/incidents/{inc['id']}", headers=admin, json={"action": "repair", "note": "Valve reopened"})
+    steps(10)
+    notes = client.get("/api/citizen/notifications?household_id=PW-HH-045").json()
+    assert any(n["kind"] == "first_flush" for n in notes)
+    assert not any(n["kind"] == "first_flush" for n in client.get("/api/citizen/notifications?household_id=PW-HH-005").json())
+    assert alert_text.t("mr", "n_first_flush").startswith("पाणी परत")
+
+
+def test_who_is_left_out_and_reported_against_observed(client, admin):
+    dk = client.get("/api/villages/VLG-DK/equity", headers=admin).json()
+    assert dk["chronic"] and dk["reported"]["fhtc"] == 72 and dk["reported"]["har_ghar_jal"]
+    assert dk["observed"]["reliable"] < 72 and dk["gap"] == 72 - dk["observed"]["reliable"] and dk["certification_at_risk"]
+    assert all(h["days_failed"] >= 5 for h in dk["chronic"])
+    r = client.get("/api/reconcile?level=state&id=ST-MH&minutes=30", headers=admin).json()
+    assert len(r["villages"]) == 6 and r["fetching"]["hours"] > 0 and "assumption" in r["fetching"]["assumption"]
+    assert client.get("/api/reconcile?level=state&id=ST-MH", headers=login(client, "naljal.mitra")).status_code == 403
+
+
+def test_families_and_sensors_are_compared_and_repairs_carry_photos(client, admin):
+    steps(4)
+    main.P.skip_to_window(0)
+    main.P.fast_forward(lambda p: not p.clock.in_window)  # a window closes: the daily pulse is collected
+    pulse = client.get(f"/api/villages/{PW}/pulse", headers=admin).json()
+    assert pulse["answers"] > 0 and pulse["agreement_pct"] is not None
+    scenario(client, admin, "low_pressure")
+    steps(10)
+    inc = pw_incidents(client, admin, "LOW_PRESSURE")[0]
+    shot = client.post(f"/api/incidents/{inc['id']}/photo", headers=admin, data={"lat": "18.5051", "lon": "73.5179"},
+                       files={"photo": ("fix.jpg", b"\xff\xd8\xff" + b"0" * 40, "image/jpeg")}).json()
+    assert shot["url"].startswith("/uploads/") and shot["lat"] == 18.5051
+    d = client.get(f"/api/incidents/{inc['id']}", headers=admin).json()
+    assert d["evidence"]["repair_photos"][0]["url"] == shot["url"] and any("repair photo" in h for h in d["closure"]["have"])
+    assert isinstance(pw_incidents(client, admin)[0]["why"], list)

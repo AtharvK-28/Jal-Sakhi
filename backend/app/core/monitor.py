@@ -461,6 +461,7 @@ class VillageMonitor:
                 self._detect_branch(clk, b, scheme_down)
                 if not scheme_down:
                     self._detect_taps(b)
+                    self._detect_boosters(b)
         self._detect_forecast(clk)
 
     def _detect_taps(self, b: int):
@@ -501,6 +502,59 @@ class VillageMonitor:
                                      "devices": [dev]})
             self._settle(key, hit, cond, f"The tap at {self.labels[i]} is delivering again")
 
+    def _booster_explains(self, b: int) -> bool:
+        """Is a metered tap on this lane pumping right now (seen, or an open suction-pump incident not yet recovered)?"""
+        for i in self.inst_idx[b]:
+            key = f"{self.id}:boost:{self.hh_ids[int(i)]}"
+            open_ = self.ctx.incidents.get_by_key(key)
+            if self.count[key] > 0 or (open_ is not None and not open_["recovered_at"]):
+                return True
+        return False
+
+    def _detect_boosters(self, b: int):
+        """A household pumping straight from the lane: its metered tap draws several times what any tap can at that
+        pressure, while the homes after it on the lane lose pressure. Common in intermittent supply; it starves the tail."""
+        inc, T = self.ctx.incidents, self.ctx.telemetry
+        br = self.branch[b]
+        if not br["fresh_in"] or (br["p_in"] or 0.0) < C.P_DRY:
+            return
+        flows = {}
+        for b2 in range(self.nb):
+            for i in self.inst_idx[b2]:
+                dev = f"{self.hh_ids[int(i)]}-TAP"
+                if T.fresh(dev):
+                    flows[int(i)] = T.value(dev, "flow_lpm", 0.0)
+        bid, lane = br["id"], br["name"]
+        for i in self.inst_idx[b]:
+            i = int(i)
+            q = flows.get(i)
+            others = [v for j, v in flows.items() if j != i and v > 2.0]  # taps that are filling
+            typical = float(np.median(others)) if len(others) >= 3 else 9.0
+            key = f"{self.id}:boost:{self.hh_ids[i]}"
+            cond = q is not None and q > max(18.0, 2.2 * typical)
+            hit = self._persist(key, cond, C.PERSIST["tap"])
+            if hit:
+                down = [int(j) for j in self.branch_idx[b] if self.x[j] > self.x[i]]
+                starved = int(np.isin(self.status[down], [LOW, DRY]).sum()) if down else 0
+                label = self.labels[i]
+                tail = br["p_end"] if br["fresh_end"] else None
+                inc.raise_(key, self.id, "SUSPECTED_BOOSTER", "medium" if starved else "low", scope_type="household",
+                           scope_id=self.hh_ids[i], branch_id=bid, affected_ids=[self.hh_ids[j] for j in down], confidence=0.8,
+                           title=f"Suspected suction pump at {label}: homes after it on {lane} lose pressure",
+                           summary=f"The tap at {label} draws {q:.0f} L/min, {q / typical:.1f} times a typical filling tap in this "
+                                   f"village ({typical:.0f} L/min), which no tap can do on the lane's pressure alone. "
+                                   f"{len(down)} homes are downstream of it; {starved} are on low pressure or dry right now"
+                                   + (f", and the tail of the lane reads {tail:.2f} bar." if tail is not None else "."),
+                           cause="Suspected: an electric pump fitted on the household tap, filling a drum or overhead tank at the "
+                                 "start of supply (or a broken service pipe running free).",
+                           action=f"Pani Samiti or operator to visit {label} in the first half hour of supply. If a pump is fitted, "
+                                  "explain what it does to the homes after it and agree its removal; the committee can make this a "
+                                  "condition of the connection. If there is none, check the service pipe for a break.",
+                           evidence={"tap_flow_lpm": round(q, 1), "typical_lpm": round(typical, 1), "ratio": round(q / typical, 1),
+                                     "downstream_homes": len(down), "starved_now": starved, "tail_bar": None if tail is None else round(tail, 3),
+                                     "devices": [f"{self.hh_ids[i]}-TAP"]})
+            self._settle(key, hit, cond, f"The tap at {self.labels[i]} is drawing a normal flow again")
+
     def _detect_branch(self, clk, b: int, scheme_down: bool):
         inc = self.ctx.incidents
         T = self.ctx.telemetry
@@ -540,6 +594,8 @@ class VillageMonitor:
                        cause="Suspected: branch isolation valve closed or failed, or a complete blockage/break at the head of the lane.",
                        action=f"Inspect the isolation valve at the head of {lane}, then the first pipe segment downstream.",
                        evidence={"p_in_bar": p_in, "flow_lpm": q, "devices": [f"{bid}-IN", f"{bid}-END"]})
+        elif (hit_low or hit_anom) and self._booster_explains(b):
+            pass  # one tap pumping explains the extra flow and the lost pressure: no leak hunt; the pump incident says why
         elif hit_low or hit_anom:
             wm = ML.window_means(tr.hist)
             zq = wm["z_q"] if wm else (float(np.mean(self.zq_hist[b])) if self.zq_hist[b] else 0.0)

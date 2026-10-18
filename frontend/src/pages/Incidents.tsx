@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  AlertTriangle, BadgeCheck, BellRing, Building2, CheckCircle2, ClipboardCheck, Clock, FlaskConical, Hammer, Lock, MapPin, MessageSquareText, NotebookPen,
+  AlertTriangle, BadgeCheck, BellRing, Building2, Camera, CheckCircle2, ClipboardCheck, Clock, FlaskConical, Hammer, Lock, MapPin, MessageSquareText, NotebookPen,
   Play, RotateCcw, ShieldAlert, Siren, Timer, TrendingUp, UserCheck, Users, Wrench, XCircle,
 } from "lucide-react";
 import { api, getSession, resolveUrl } from "../lib/api";
@@ -203,6 +203,8 @@ function IncidentDrawer({ id, onClose }: { id: string; onClose: () => void }) {
         {d.closure_reason && <p className="sm" style={{ marginTop: 8 }}><b>Closed:</b> {d.closure_reason}</p>}
       </div>
 
+      <RepairPhotos d={d} onAdded={reload} />
+
       {d.deliveries?.length > 0 && (
         <div className="card pad">
           <div className="row between"><div className="upper muted">Phone alerts sent</div><span className="pill info"><BellRing />{d.deliveries.length}</span></div>
@@ -261,6 +263,35 @@ function IncidentDrawer({ id, onClose }: { id: string; onClose: () => void }) {
         </div>
       </div>
     </Drawer>
+  );
+}
+
+/** A photo of the work, stamped with when and where it was taken: closure evidence a desk cannot fake. */
+function RepairPhotos({ d, onAdded }: { d: any; onAdded: () => void }) {
+  const shots: any[] = d.evidence?.repair_photos || [];
+  const [busy, setBusy] = useState(false);
+  const add = async (f: File | null) => {
+    if (!f) return;
+    setBusy(true);
+    const pos = await new Promise<GeolocationPosition | null>((res) => navigator.geolocation ? navigator.geolocation.getCurrentPosition(res, () => res(null), { timeout: 5000 }) : res(null));
+    const fd = new FormData();
+    fd.append("photo", f);
+    if (pos) { fd.append("lat", String(pos.coords.latitude)); fd.append("lon", String(pos.coords.longitude)); }
+    try { await api(`/api/incidents/${d.id}/photo`, { form: fd }); toast(pos ? "Repair photo added with its location" : "Repair photo added (the device gave no location)"); onAdded(); } catch (e: any) { toast(e.message, true); }
+    setBusy(false);
+  };
+  if (d.status === "closed" && !shots.length) return null;
+  return (
+    <div className="card pad">
+      <div className="row between"><div className="upper muted">Proof of repair</div>
+        {d.status !== "closed" && <label className="btn ghost sm" style={{ cursor: "pointer" }}><Camera />{busy ? "Uploading…" : "Add a photo of the work"}
+          <input type="file" accept="image/*" capture="environment" hidden onChange={(e) => add(e.target.files?.[0] || null)} /></label>}</div>
+      {shots.length === 0 ? <p className="xs muted" style={{ marginTop: 6 }}>A photo of the repaired pipe or valve, taken on site, is stored with the time and the phone's location as closure evidence.</p> : (
+        <div className="row wrap" style={{ gap: 10, marginTop: 9 }}>{shots.map((s, i) => (
+          <a key={i} href={resolveUrl(s.url)} target="_blank" rel="noreferrer" className="sm" style={{ color: "var(--ink)" }}>
+            <img src={resolveUrl(s.url)} alt="repair" style={{ width: 96, height: 72, objectFit: "cover", borderRadius: 10, display: "block" }} />
+            <span className="xs muted">{dt(s.ts)}{s.lat != null ? ` · ${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}` : " · no location"}</span></a>))}</div>)}
+    </div>
   );
 }
 

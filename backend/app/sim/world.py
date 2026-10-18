@@ -40,6 +40,7 @@ class Faults:
     blockage: dict = field(default_factory=dict)  # branch idx -> (x, severity 0..1)
     leak: dict = field(default_factory=dict)  # branch idx -> (x, coeff L/min at 1 bar)
     tap_block: dict = field(default_factory=dict)  # household idx -> share of pressure lost in that home's own service line
+    booster: dict = field(default_factory=dict)  # household idx -> L/min an electric pump on that tap draws while it fills
     transient: dict = field(default_factory=dict)  # branch idx -> minutes remaining
     turbidity: float = 0.0  # added source turbidity (NTU)
     chlorine_fail: bool = False
@@ -50,7 +51,7 @@ class Faults:
     def any_active(self) -> bool:
         return bool(
             self.pump_trip or self.wear_rate or self.main_closed or self.branch_closed or self.blockage
-            or self.leak or self.tap_block or self.turbidity or self.chlorine_fail or self.offline or self.gw_decline
+            or self.leak or self.tap_block or self.booster or self.turbidity or self.chlorine_fail or self.offline or self.gw_decline
         )
 
 
@@ -197,6 +198,10 @@ class VillageSim:
             leak_q[b] = ql
             m = self._nb_of == b
             g[m] -= LEAK_DROP * ql * np.minimum(self._nx[m] / xl, 1.0)
+        for b, xl, qx in getattr(self, "_draws", ()):  # a pump on a tap pulls the lane down like a leak at that home
+            if p_in[b] > 0:
+                m = self._nb_of == b
+                g[m] -= LEAK_DROP * qx * np.minimum(self._nx[m] / max(xl, 1e-3), 1.0)
         for b, left in f.transient.items():
             if left > 0:
                 g[self._nb_of == b] *= 0.25
@@ -232,6 +237,9 @@ class VillageSim:
             self.delay[late] += self.rng.uniform(20, 60, int(late.sum()))
             self.got_window[:] = 0
             self.bg_left[:] = 0
+            for i in f.booster:  # the pump fills a large drum or overhead tank, and starts with the supply
+                self.need[i] *= 6
+                self.delay[i] = self.rng.uniform(0, 3)
 
         # ---- source and pump (float-switch control with hysteresis)
         frac = self.tank / self.cap
@@ -265,16 +273,22 @@ class VillageSim:
             self.bg_left[start_bg] = self.rng.integers(2, 5, int(start_bg.sum()))
             bg = (~filling) & (self.bg_left > 0)
             throttle = np.where(filling, 1.0, np.where(bg, 0.42, 0.0))
+            pumping = [i for i in f.booster if filling[i]]
+            self._draws = [(int(self.b_of[i]), float(self.x[i]), f.booster[i]) for i in pumping]
             qb = self.q_prev.copy()
             for _ in range(4):
                 p_in, g, leak_q = self._grades(head, qb)
                 pn = np.maximum(g - self._nelev, 0.0)
                 q = throttle * self.k * np.sqrt(self._at_tap(pn[:n]))
+                for i in pumping:  # a pump draws its own rate whatever the pressure, while the lane has water
+                    q[i] = f.booster[i] if p_in[self.b_of[i]] > 0 else 0.0
                 q_new = np.bincount(self.b_of, weights=q, minlength=nb) + leak_q
                 qb = 0.5 * qb + 0.5 * q_new
             p_in, g, leak_q = self._grades(head, qb)
             pn = np.maximum(g - self._nelev, 0.0)
             q = throttle * self.k * np.sqrt(self._at_tap(pn[:n]))
+            for i in pumping:
+                q[i] = f.booster[i] if p_in[self.b_of[i]] > 0 else 0.0
             vol = q * dt
             vol = np.where(filling, np.minimum(vol, self.need), vol)
             out = float(vol.sum() + leak_q.sum() * dt)

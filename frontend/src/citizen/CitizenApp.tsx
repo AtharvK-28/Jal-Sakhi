@@ -11,7 +11,7 @@ import { hhmm, n0 } from "../lib/format";
 
 const CATS: [string, any][] = [["no_water", Ban], ["low_pressure", Gauge], ["dirty_water", GlassWater], ["leakage", Droplets], ["smell_taste", Wind], ["irregular", Clock], ["tap_damage", Wrench], ["other", MoreHorizontal]];
 const STEPS = ["open", "acknowledged", "in_progress", "resolved_pending_verification", "closed"];
-const TYPE_CAT: Record<string, string> = { SUPPLY_INTERRUPTION: "no_water", LOW_PRESSURE: "low_pressure", SUSPECTED_LEAK: "leakage", QUALITY_VERIFY: "dirty_water", COMMUNITY_CLUSTER: "dirty_water", PUMP_FAULT: "no_water" };
+const TYPE_CAT: Record<string, string> = { SUPPLY_INTERRUPTION: "no_water", LOW_PRESSURE: "low_pressure", SUSPECTED_LEAK: "leakage", QUALITY_VERIFY: "dirty_water", COMMUNITY_CLUSTER: "dirty_water", PUMP_FAULT: "no_water", SUSPECTED_BOOSTER: "low_pressure", ABNORMAL_PATTERN: "low_pressure" };
 const SKEY = "jalsakhi.citizen";
 const REPORT_URL = () => resolveUrl("/api/complaints");
 

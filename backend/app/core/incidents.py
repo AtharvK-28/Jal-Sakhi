@@ -18,6 +18,7 @@ TYPES = {
     "SUSPECTED_LEAK": {"category": "leak", "label": "Suspected leakage", "assign": "crew"},
     "ABNORMAL_PATTERN": {"category": "anomaly", "label": "Abnormal service pattern", "assign": "operator"},
     "QUALITY_VERIFY": {"category": "quality", "label": "Water quality: verification required", "assign": "ftk"},
+    "SUSPECTED_BOOSTER": {"category": "equity", "label": "Suspected suction pump on a tap", "assign": "operator"},
     "SENSOR_OFFLINE": {"category": "sensor", "label": "Sensor offline", "assign": "device"},
     "PUMP_FAULT": {"category": "infrastructure", "label": "Pump failure", "assign": "crew"},
     "PUMP_RISK": {"category": "predictive", "label": "Pump failure risk", "assign": "crew"},
@@ -28,6 +29,8 @@ TYPES = {
 }
 STATUSES = ["open", "acknowledged", "in_progress", "resolved_pending_verification", "closed"]
 OPEN_STATUSES = STATUSES[:-1]
+# After these, the pipe stood empty or under low pressure and may have drawn dirt in: the first water back is the riskiest.
+FLUSH_AFTER = {"SUPPLY_INTERRUPTION", "LOW_PRESSURE", "SUSPECTED_LEAK", "ABNORMAL_PATTERN", "SUSPECTED_BOOSTER"}
 AUTO_CLOSE = {"SENSOR_OFFLINE", "SHORTFALL_PREDICTED"}  # close themselves once the condition is gone
 TYPE_RANK = {"ABNORMAL_PATTERN": 1, "LOW_PRESSURE": 2, "SUSPECTED_LEAK": 3, "SUPPLY_INTERRUPTION": 4,
              "COMMUNITY_CLUSTER": 1}  # an incident may be reclassified upwards, never silently downgraded
@@ -127,6 +130,8 @@ class IncidentManager:
             return
         inc["recovered_at"] = self.ctx.now.isoformat(timespec="seconds")
         self._event(inc, "recovery", note=note)
+        if inc["type"] in FLUSH_AFTER:
+            self.ctx.first_flush(inc)
         if inc["type"] in AUTO_CLOSE:
             self._close(inc, "system", "system", "Self-resolved: condition cleared")
         elif inc["status"] in ("open", "acknowledged", "in_progress"):
@@ -242,6 +247,8 @@ class IncidentManager:
             got.append("FTK re-test passed")
         if ev.get("lab_pass"):
             got.append("laboratory result within limits (WQMIS)")
+        if ev.get("repair_photos"):
+            got.append(f"{len(ev['repair_photos'])} repair photo(s) with time and place")
         if inc.get("origin") == "ftk":  # raised by a failed field test: a passing re-test (or lab result) is the proof
             ok = bool(ev.get("ftk_pass") or ev.get("lab_pass")) and ev.get("lab_pass") is not False
             missing = "a passing field re-test or laboratory result"
@@ -390,6 +397,11 @@ class IncidentManager:
                 "recovered_at", "detection_delay_min")
         out = {k: inc.get(k) for k in keys}
         out["label"] = TYPES[inc["type"]]["label"]
+        # why it ranks where it does, biggest reason first (severity aside), for people who do not read scores
+        parts = inc.get("priority_breakdown") or {}
+        worth = {"households_affected": 4, "citizen_reports": 2, "health_risk": 1, "sensitive_sites": 1, "ageing_sla": 3}  # below these, not a reason
+        out["why"] = [k for k, v in sorted(parts.items(), key=lambda kv: -kv[1]) if k in worth and v >= worth[k]][:3]
+        out["site_names"] = [s["name"] for s in self.ctx.sensitive_sites(inc)]
         return out
 
     def open_list(self, village_ids: set[str] | None = None) -> list[dict]:

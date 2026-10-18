@@ -17,7 +17,7 @@ import numpy as np
 
 from .. import config as C
 from .. import seed as S
-from ..core import analytics
+from ..core import analytics, equity
 from ..core.alerts import AlertDispatcher
 from ..core.complaints import ComplaintService
 from ..core.incidents import IncidentManager
@@ -63,6 +63,8 @@ SCENARIOS = {
                        "desc": "A gateway fails: three devices on a lane stop reporting. Affected households become 'unknown', never 'healthy'."},
     "transient": {"label": "Transient dip (must be ignored)", "group": "data", "icon": "minus", "branch": 0,
                   "desc": "A two-minute pressure dip. The persistence rule suppresses it: no incident."},
+    "suction_pump": {"label": "Suction pump on a tap", "group": "supply", "icon": "gauge", "branch": 3,
+                     "desc": "A household fits an electric pump on its tap at the start of supply. It fills a large drum fast and the homes after it on the lane lose pressure."},
     "citizen_cluster": {"label": "Clustered complaints", "group": "community", "icon": "users", "branch": 2,
                         "desc": "Four households on one lane report dirty water where no quality sensor exists."},
 }
@@ -174,6 +176,7 @@ class Platform:
             self.institutions[v["id"]] = sites
             hist = S.seed_history(v)
             self.history[v["id"]] = hist
+            db.executemany("INSERT INTO hh_daily VALUES (?,?,?,?,?,?,?,?,?,?)", equity.seed_rows(v, sim, hist))
             for r in hist:
                 hist_rows.append(tuple(r[k] for k in ("village_id", "day", "functional_pct", "regularity_pct", "quantity_pct",
                                                       "quality_pct", "avg_lpcd", "supply_hours", "incidents", "complaints",
@@ -236,6 +239,15 @@ class Platform:
                     household_id=inc["scope_id"] if inc["scope_type"] == "household" else None, incident_id=inc["id"],
                     channel="app+sms")
 
+    def first_flush(self, inc: dict):
+        """Water is back after a break or a pressure loss: tell the households it reaches to run the tap before drinking."""
+        if not self.clock.in_window:
+            return
+        lane = inc["branch_id"] if inc["scope_type"] in ("branch", "household") else None
+        self.notify(inc["village_id"], "first_flush", {"incident": inc["id"]}, branch_id=lane, incident_id=inc["id"], channel="app+sms")
+        self.incidents.add_event(inc, "advisory", "First-flush advice sent to the households on this supply: run the tap "
+                                 "for 2 minutes before filling drinking water.")
+
     def on_incident_status(self, inc: dict, prev: str, to: str):
         self.complaints.on_incident_status(inc, to)
         if to in ("in_progress", "resolved_pending_verification", "closed") and inc["category"] != "sensor":
@@ -258,7 +270,7 @@ class Platform:
                 "LOW_PRESSURE": [f"blockage:{b}", f"leak:{b}"], "SUSPECTED_LEAK": [f"leak:{b}", f"blockage:{b}"],
                 "ABNORMAL_PATTERN": [f"leak:{b}", f"blockage:{b}"], "PUMP_FAULT": ["pump_trip"], "PUMP_RISK": ["wear"],
                 "QUALITY_VERIFY": ["turbidity", "chlorine"], "SENSOR_OFFLINE": [f"offline:{b}", "offline"],
-                "SHORTFALL_PREDICTED": ["pump_trip"]}.get(type_, [])
+                "SHORTFALL_PREDICTED": ["pump_trip"], "SUSPECTED_BOOSTER": [f"booster:{b}"]}.get(type_, [])
         for k in keys:
             if k in inj:
                 delay = round((self.now - inj[k]).total_seconds() / 60, 1)
@@ -282,6 +294,8 @@ class Platform:
                 f.branch_closed.discard(b)
         elif t == "TAP_FAULT":
             f.tap_block.pop(sim.hh_ids.index(inc["scope_id"]), None)
+        elif t == "SUSPECTED_BOOSTER":
+            f.booster.pop(sim.hh_ids.index(inc["scope_id"]), None)
         elif t in ("PUMP_FAULT", "PUMP_RISK"):
             f.pump_trip, f.wear_rate, sim.pump_wear = False, 0.0, 0.05
             mon = self.monitors[sim.id]
@@ -473,6 +487,7 @@ class Platform:
                        "mttr_h": None, "nrw_pct": max(0.0, mon.water_balance()["unaccounted_pct"] or 0.0),
                        "energy_kwh": round(mon.bal["kwh"], 1),
                        "gw_depth_m": mon.source.get("rest_m") or mon.source.get("depth_m"), "source": "simulation-live"}
+                equity.record_day(self, vid, day)
                 self.db.execute("DELETE FROM daily_history WHERE village_id=? AND day=?", (vid, day))
                 self.db.insert("daily_history", row)
                 self.history[vid] = [r for r in self.history[vid] if r["day"] != day] + [row]
@@ -557,6 +572,14 @@ class Platform:
             elif name == "transient":
                 f.transient[b] = 2
                 detail = f"Two-minute pressure dip on {lane}."
+            elif name == "suction_pump":
+                idx = np.flatnonzero((sim.b_of == b) & sim.instrumented)
+                i = int(idx[np.argmin(np.abs(sim.x[idx] - 0.35))])
+                f.booster[i] = 28.0
+                f.injected[f"booster:{b}"] = now
+                sim.need[i] = sim.members[i] * C.FILL_LPCD * C.WINDOW_SHARE[self.clock.win_idx or 0] * 6
+                sim.delay[i] = 0.0
+                detail = f"An electric pump on the tap at HH-{i + 1:03d} ({lane}) draws about 28 L/min while it fills a large drum."
             elif name == "citizen_cluster":
                 idx = [int(i) for i in np.flatnonzero(sim.b_of == b)]
                 self._cit[vid]["cluster_fixed"] = False
@@ -577,6 +600,7 @@ class Platform:
         out += [f"obstruction on {sim.branch_names[b]}" for b in f.blockage]
         out += [f"leak on {sim.branch_names[b]}" for b in f.leak]
         out += [f"tap blocked at HH-{i + 1:03d}" for i in f.tap_block]
+        out += [f"suction pump at HH-{i + 1:03d}" for i in f.booster]
         out += ["pump tripped"] if f.pump_trip else []
         out += ["pump wearing"] if f.wear_rate else []
         out += ["turbidity spike"] if f.turbidity else []
