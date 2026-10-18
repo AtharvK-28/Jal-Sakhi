@@ -1,0 +1,23 @@
+name: Render Keep-Alive
+
+on:
+  schedule:
+    # Runs every 10 minutes to prevent Render free tier from sleeping
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
+
+jobs:
+  ping:
+    name: Ping Backend Health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send keep-alive HTTP GET
+        run: |
+          echo "Pinging JalSakhi Render backend..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 https://jalsakhi-backend-mgns.onrender.com/api/health)
+          echo "HTTP response status: $STATUS"
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
+            echo "Render backend is awake and responding!"
+          else
+            echo "Warning: Response status was $STATUS"
+          fi
