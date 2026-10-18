@@ -6,6 +6,36 @@ import { LineChart } from "../components/charts";
 import { VillagePicker } from "../components/Shell";
 import { CAT_LABEL, SUPPLY, dt, fromMinute, n0, n1 } from "../lib/format";
 
+/** Two checks on the monitoring itself: do families agree with the sensors, and which homes fall short again and again. */
+function TruthCards({ village }: { village: string }) {
+  const { data: pulse } = usePoll<any>(`/api/villages/${village}/pulse`, 15000);
+  const { data: eq } = usePoll<any>(`/api/villages/${village}/equity`, 30000);
+  if (!pulse || !eq) return null;
+  return (
+    <div className="grid g2" style={{ marginBottom: 14 }}>
+      <div className="card pad">
+        <div className="row between"><b>Do families agree with the sensors?</b>
+          <span className={`pill ${pulse.agreement_pct == null ? "" : pulse.agreement_pct >= 90 ? "good" : "medium"}`}>{pulse.agreement_pct == null ? "first answers after a window" : `${pulse.agreement_pct}% agree`}</span></div>
+        <p className="xs muted" style={{ margin: "4px 0 8px" }}>{pulse.answers} "did water come?" answers compared with what the sensors inferred for the same home and window. {pulse.note}</p>
+        {pulse.disagreements.slice(0, 5).map((r: any, i: number) => (
+          <div key={i} className="row between sm" style={{ padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+            <span><b>{r.label}</b> · {r.lane}{r.metered ? " · metered" : ""}</span>
+            <span className="xs">family said <b>{r.got_water ? "yes" : "no"}</b>, sensors said <b>{r.inferred ? "yes" : "no"}</b> · {r.window} {r.day.slice(5)}</span>
+          </div>))}
+      </div>
+      <div className="card pad">
+        <div className="row between"><b>Homes left out this week</b><span className={`pill ${eq.chronic.length ? "medium" : "good"}`}>{eq.chronic.length} homes</span></div>
+        <p className="xs muted" style={{ margin: "4px 0 8px" }}>{eq.rules.chronic}. A village average hides them; these are the same homes every day.</p>
+        {eq.chronic.slice(0, 5).map((h: any) => (
+          <div key={h.id} className="row between sm" style={{ padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+            <span><b>{h.label}</b> · {h.lane} · position {h.position}</span><span className="xs"><b style={{ color: "var(--crit)" }}>{h.days_failed}/{h.of}</b> days · {h.avg_lpcd} lpcd</span>
+          </div>))}
+        {eq.dry.length > 0 && <div className="xs" style={{ marginTop: 6, color: "var(--crit)", fontWeight: 650 }}>No water for 14 days: {eq.dry.map((h: any) => h.label).join(", ")}</div>}
+      </div>
+    </div>
+  );
+}
+
 export function Households() {
   const { village, focus } = useLive();
   const [q, setQ] = useState("");
@@ -23,6 +53,7 @@ export function Households() {
         <div><h1>Households</h1><p>Every Functional Household Tap Connection in {focus?.name || "the village"}, with what we know about its service right now and how we know it.</p></div>
         <VillagePicker />
       </div>
+      <TruthCards village={village} />
       <div className="card pad row wrap" style={{ marginBottom: 14 }}>
         <div style={{ position: "relative", flex: "1 1 240px" }}>
           <Search size={15} style={{ position: "absolute", left: 11, top: 11, color: "var(--muted)" }} />

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
-  BarChart3, BellRing, ChevronRight, PiggyBank, Cpu, Droplets, FlaskConical, Home, LayoutDashboard, LogOut, Map as MapIcon, Menu, MessageSquareText,
+  BarChart3, BellRing, ChevronRight, PiggyBank, Scale, Cpu, Droplets, FlaskConical, Home, LayoutDashboard, LogOut, Map as MapIcon, Menu, MessageSquareText,
   Moon, Network, Pause, RefreshCw, ShieldCheck, Siren, Smartphone, Sparkles, Sun, Volume2, VolumeX, WifiOff, Wrench,
 } from "lucide-react";
 import { api, clearSession, getSession } from "../lib/api";
@@ -26,6 +26,7 @@ const NAV = [
   { to: "/app/ai", icon: Sparkles, label: "AI insights" },
   { to: "/app/analytics", icon: BarChart3, label: "Analytics" },
   { to: "/app/planner", icon: PiggyBank, label: "Investment planner" },
+  { to: "/app/reconcile", icon: Scale, label: "Reported vs observed" },
   { grp: "Platform" },
   { to: "/app/integration", icon: RefreshCw, label: "IMIS / Sujal Gaon sync" },
   { to: "/app/devices", icon: Cpu, label: "Devices & hardware" },

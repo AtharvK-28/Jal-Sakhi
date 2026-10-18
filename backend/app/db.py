@@ -100,6 +100,10 @@ CREATE TABLE IF NOT EXISTS daily_history (
   avg_lpcd REAL, supply_hours REAL, incidents INTEGER, complaints INTEGER, mttr_h REAL, nrw_pct REAL,
   energy_kwh REAL, gw_depth_m REAL, source TEXT, PRIMARY KEY (village_id, day));
 
+CREATE TABLE IF NOT EXISTS hh_daily (
+  village_id TEXT, household_id TEXT, day TEXT, regular INTEGER, quantity INTEGER, quality INTEGER, known INTEGER,
+  functional INTEGER, lpcd REAL, source TEXT, PRIMARY KEY (village_id, household_id, day));
+
 CREATE TABLE IF NOT EXISTS om_tasks (
   id TEXT PRIMARY KEY, village_id TEXT NOT NULL, slug TEXT, asset TEXT, title TEXT, every_days INTEGER, basis TEXT,
   last_done TEXT, done_by TEXT, note TEXT);

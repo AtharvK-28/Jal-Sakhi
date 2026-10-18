@@ -22,6 +22,7 @@ import { Board } from "./pages/Board";
 import { TesterApp } from "./citizen/TesterApp";
 import { SamitiApp } from "./citizen/SamitiApp";
 import { Planner } from "./pages/Planner";
+import { Reconcile } from "./pages/Reconcile";
 import { Loader } from "./components/ui";
 
 // the 3D map engine is large; load it only when the GIS page is opened
@@ -56,6 +57,7 @@ export function App() {
           <Route path="ai" element={<AIInsights />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="planner" element={<Planner />} />
+          <Route path="reconcile" element={<Reconcile />} />
           <Route path="integration" element={<Integration />} />
           <Route path="devices" element={<Devices />} />
           <Route path="about" element={<About />} />

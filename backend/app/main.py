@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from . import config as C
 from . import seed as S
 from .core import analytics, planner
-from .core import interop, invest, sampling
+from .core import equity, interop, invest, sampling
 from .core.alerts import ROLE_TITLE as ALERT_ROLE_TITLE
 from .core.complaints import ComplaintError, LABEL as COMPLAINT_LABEL
 from .core.incidents import IncidentError, TYPES as INCIDENT_TYPES
@@ -360,7 +360,7 @@ def citizen_village(village_id: str):
                 "quality": {"status": k["quality_status"], "sensors": [{k2: q[k2] for k2 in ("name", "turbidity_ntu", "chlorine_mgl", "ph", "status")} for q in mon.quality]},
                 "tank_pct": mon.tank.get("level_pct"), "issues": issues, "tests": tests, "clock": P.clock_state(),
                 "week": [{"day": r["day"], "functional_pct": r["functional_pct"]} for r in hist],
-                "households": k["households"], "pulse": k["pulse"]}
+                "households": k["households"], "pulse": k["pulse"], "left_out": len(equity.view(P, village_id)["chronic"])}
 
 
 @app.get("/api/citizen/notifications")
@@ -831,6 +831,68 @@ def invest_plan(level: str = "state", id: str = "ST-MH", budget: float = Query(1
         raise HTTPException(403, "this unit is outside your jurisdiction")
     with P.lock:
         return _plain(invest.plan(P, vids, budget))
+
+
+@app.get("/api/villages/{village_id}/equity")
+def village_equity(village_id: str, user=Depends(staff)):
+    """Homes left out day after day, homes with no water for two weeks, and reported against observed service."""
+    need_village(user, village_id)
+    with P.lock:
+        return _plain(equity.view(P, village_id))
+
+
+@app.get("/api/reconcile")
+def reconcile(level: str = "state", id: str = "ST-MH", minutes: float = Query(30, ge=0, le=600), user=Depends(staff)):
+    """What IMIS would report against what is observed, for every village in a jurisdiction, and the fetching it costs."""
+    vids = [v["id"] for v in analytics.villages_under(level, id)]
+    if not vids or not set(vids) <= scope_of(user):
+        raise HTTPException(403, "this unit is outside your jurisdiction")
+    with P.lock:
+        return _plain({"villages": equity.summary(P, vids), "fetching": equity.fetching(P, vids, minutes), "rules": equity.view(P, vids[0])["rules"]
+                       | {"reliable": f"functional on at least {equity.RELIABLE_MIN} of the last {equity.RELIABLE_OF} days"}})
+
+
+@app.get("/api/villages/{village_id}/pulse")
+def village_pulse(village_id: str, user=Depends(staff)):
+    """Families' daily 'did water come?' against what the sensors inferred for the same home and supply window."""
+    need_village(user, village_id)
+    with P.lock:
+        rows = P.db.query("SELECT household_id, day, window_idx, got_water, inferred, source FROM pulse WHERE village_id=? AND inferred IS NOT NULL"
+                          " ORDER BY id DESC LIMIT 600", (village_id,))
+        agree = sum(1 for r in rows if bool(r["got_water"]) == bool(r["inferred"]))
+        off = [r for r in rows if bool(r["got_water"]) != bool(r["inferred"])][:12]
+        for r in off:
+            h = P.households[r["household_id"]]
+            r.update(label=h["label"], lane=h["lane"], metered=h["instrumented"], window=C.SUPPLY_WINDOWS[r["window_idx"]][2] if r["window_idx"] is not None else None)
+        return {"answers": len(rows), "agree": agree, "agreement_pct": round(100 * agree / len(rows), 1) if rows else None, "disagreements": off,
+                "note": "Every disagreement is a home the sensors may be wrong about, or a family whose tap needs a visit."}
+
+
+@app.post("/api/incidents/{incident_id}/photo", status_code=201)
+async def incident_photo(incident_id: str, photo: UploadFile = File(...), lat: float | None = Form(None), lon: float | None = Form(None),
+                         note: str = Form(""), user=Depends(staff)):
+    """A photo of the repair, with the time and place it was taken, kept as closure evidence."""
+    if not (photo.content_type or "").startswith("image/"):
+        raise HTTPException(415, "photo must be an image")
+    data = await photo.read()
+    if len(data) > C.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "photo is larger than 5 MB")
+    with P.lock:
+        inc = P.incidents.items.get(incident_id.upper())
+        if inc is None:
+            raise HTTPException(404, "open incident not found")
+        need_village(user, inc["village_id"])
+        name = f"{uuid.uuid4().hex}.jpg"
+        C.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        (C.UPLOAD_DIR / name).write_bytes(data)
+        shot = {"url": f"/uploads/{name}", "lat": lat, "lon": lon, "ts": P.now.isoformat(timespec="seconds"), "by": user["name"], "note": note[:200]}
+        inc["evidence"].setdefault("repair_photos", []).append(shot)
+        where = f" at {lat:.5f}, {lon:.5f}" if lat is not None and lon is not None else " (no location from the device)"
+        P.incidents.add_event(inc, "photo", f"Repair photo added by {user['name']}{where}", actor=user["name"], role=user["role"], data=shot)
+        P.incidents._persist(inc)
+        P.audit.log(P.now, user["name"], user["role"], "incident.photo", "incident", inc["id"], None, None, shot["url"])
+        P.version += 1
+        return shot
 
 
 @app.get("/api/ai/insights")

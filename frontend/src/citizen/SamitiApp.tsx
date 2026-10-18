@@ -11,7 +11,7 @@ import { Drop, LiquidGauge, ToastHost, Waves, toast } from "../components/ui";
 const LKEY = "jalsakhi.samiti.lang";
 const DEMO_USER = "vwsc.pimpalwadi";
 const TYPE_CAT: Record<string, string> = { SUPPLY_INTERRUPTION: "no_water", LOW_PRESSURE: "low_pressure", SUSPECTED_LEAK: "leakage", QUALITY_VERIFY: "dirty_water",
-  COMMUNITY_CLUSTER: "dirty_water", PUMP_FAULT: "no_water", TAP_FAULT: "tap_damage", ABNORMAL_PATTERN: "low_pressure", CITIZEN_REPORT: "other" };
+  COMMUNITY_CLUSTER: "dirty_water", PUMP_FAULT: "no_water", TAP_FAULT: "tap_damage", ABNORMAL_PATTERN: "low_pressure", SUSPECTED_BOOSTER: "low_pressure", CITIZEN_REPORT: "other" };
 
 export function SamitiApp() {
   const [session, setSession] = useState(getSession);
@@ -42,12 +42,14 @@ function Main({ t, lang, setLang, village, name, onOut }: { t: any; lang: Lang; 
   const [snap, setSnap] = useState<any>(null);
   const [om, setOm] = useState<any>(null);
   const [aank, setAank] = useState<any>(null);
+  const [eq, setEq] = useState<any>(null);
   const [langs, setLangs] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const load = useCallback(() => {
     api(`/api/snapshot?village=${village}`).then(setSnap).catch((e) => toast(e.message, true));
     api(`/api/om?village=${village}`).then(setOm).catch(() => {});
     api(`/api/aankalan/${village}`).then(setAank).catch(() => {});
+    api(`/api/villages/${village}/equity`).then(setEq).catch(() => {});
   }, [village]);
   useEffect(() => { load(); const id = setInterval(load, 6000); return () => clearInterval(id); }, [load]);
   const act = async (id: string, body: any, msg: string) => {
@@ -95,9 +97,10 @@ function Main({ t, lang, setLang, village, name, onOut }: { t: any; lang: Lang; 
             const late = c.iso.slice(0, 19) > (due || "").slice(0, 19);
             return (
               <div key={i.id} style={{ padding: "10px 0", borderTop: "1px solid var(--line)" }}>
-                <div className="row between"><b>{t(`cat_${TYPE_CAT[i.type] || "other"}`)} · {lane(i.branch_id)}</b><span className={`pill ${i.severity}`}>{i.severity}</span></div>
+                <div className="row between"><b>{i.type === "SUSPECTED_BOOSTER" ? t("sm_booster", { h: (i.scope_id || "").replace(/^[A-Z]+-/, "") }) : t(`cat_${TYPE_CAT[i.type] || "other"}`)} · {lane(i.branch_id)}</b><span className={`pill ${i.severity}`}>{i.severity}</span></div>
                 <div className="xs" style={{ marginTop: 3, color: late ? "var(--crit)" : "var(--ink-2)", fontWeight: late ? 700 : 500 }}>
                   <Users size={12} style={{ verticalAlign: -2 }} /> {i.affected_count} {t("homes")} · {t(`st_${i.status}`)} · {late ? t("sm_overdue", { t: due.slice(11, 16) }) : t("sm_due", { t: due.slice(11, 16) })}</div>
+                {i.why?.length > 0 && <div className="xs" style={{ marginTop: 4, color: "var(--ink-2)" }}>{i.why.map((w: string) => t(`sm_why_${w}`, { n: w === "citizen_reports" ? i.report_count : i.affected_count, s: (i.site_names || []).join(", ") })).join(" · ")}</div>}
                 <div className="row" style={{ marginTop: 8, gap: 8 }}>
                   {open && <button className="btn sm" disabled={busy === i.id} onClick={() => act(i.id, { action: "acknowledge", note: "Seen by the Pani Samiti" }, t("sm_acked"))}><CheckCircle2 />{t("sm_ack")}</button>}
                   {!i.assigned_to && <button className="btn ghost sm" disabled={busy === i.id} onClick={() => act(i.id, { action: "assign", assignee: "Block repair crew" }, t("sm_assigned"))}><Wrench />{t("sm_assign")}</button>}
@@ -106,6 +109,15 @@ function Main({ t, lang, setLang, village, name, onOut }: { t: any; lang: Lang; 
             );
           })}
         </div>
+
+        {eq && <div className="c-card">
+          <div className="row" style={{ marginBottom: 6 }}><Users size={17} color="var(--serious)" /><b>{t("sm_left_title")}</b></div>
+          {eq.chronic.length === 0 ? <p className="sm muted">{t("sm_left_none")}</p> : <>
+            <p className="sm">{t("sm_left_body", { n: eq.chronic.length })}</p>
+            {eq.chronic.slice(0, 6).map((h: any) => <div key={h.id} className="row between sm" style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}><span><b>{h.label}</b> · {h.lane}</span><span className="num xs">{h.days_failed}/{h.of}</span></div>)}
+          </>}
+          {eq.dry.length > 0 && <p className="sm" style={{ color: "var(--crit)", fontWeight: 650, marginTop: 6 }}>{t("sm_dry", { n: eq.dry.length })}</p>}
+        </div>}
 
         <div className="c-card">
           <div className="row" style={{ marginBottom: 6 }}><Wrench size={17} color="var(--brand)" /><b>{t("sm_upkeep")}</b></div>

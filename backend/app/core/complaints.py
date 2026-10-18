@@ -15,8 +15,8 @@ from ..ml.nlp_corpus import CATEGORIES
 GROUP = {"no_water": "supply", "irregular": "supply", "low_pressure": "pressure", "dirty_water": "quality",
          "smell_taste": "quality", "leakage": "leak", "tap_damage": "asset", "other": "other"}
 COMPATIBLE = {  # complaint group -> sensor incident types it corroborates
-    "supply": {"SUPPLY_INTERRUPTION", "LOW_PRESSURE", "SUSPECTED_LEAK"},
-    "pressure": {"LOW_PRESSURE", "SUSPECTED_LEAK", "SUPPLY_INTERRUPTION", "ABNORMAL_PATTERN"},
+    "supply": {"SUPPLY_INTERRUPTION", "LOW_PRESSURE", "SUSPECTED_LEAK", "SUSPECTED_BOOSTER"},
+    "pressure": {"LOW_PRESSURE", "SUSPECTED_LEAK", "SUPPLY_INTERRUPTION", "ABNORMAL_PATTERN", "SUSPECTED_BOOSTER"},
     "quality": {"QUALITY_VERIFY"},
     "leak": {"SUSPECTED_LEAK", "ABNORMAL_PATTERN", "LOW_PRESSURE"},
 }

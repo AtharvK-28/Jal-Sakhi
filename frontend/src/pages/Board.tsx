@@ -8,7 +8,7 @@ import { Drop, LiquidGauge } from "../components/ui";
 
 // incident type -> the household's own word for the problem
 const TYPE_CAT: Record<string, string> = { SUPPLY_INTERRUPTION: "no_water", LOW_PRESSURE: "low_pressure", SUSPECTED_LEAK: "leakage", QUALITY_VERIFY: "dirty_water",
-  COMMUNITY_CLUSTER: "dirty_water", PUMP_FAULT: "no_water", TAP_FAULT: "tap_damage", ABNORMAL_PATTERN: "low_pressure" };
+  COMMUNITY_CLUSTER: "dirty_water", PUMP_FAULT: "no_water", TAP_FAULT: "tap_damage", ABNORMAL_PATTERN: "low_pressure", SUSPECTED_BOOSTER: "low_pressure" };
 
 /** The village water board: a full-screen page for a TV at the Panchayat office, school or health centre,
  *  as the DDWS monitoring roadmap (2021) asks for. Public, no sign-in, refreshes itself, in the village's language. */
@@ -86,6 +86,7 @@ export function Board() {
       <div className="b-grid two">
         <section className="b-card">
           <h3><AlertTriangle />{both("issues")}</h3>
+          {v.left_out > 0 && <p className="b-line" style={{ color: "var(--serious)", fontSize: "0.95em", marginBottom: 8 }}>{both("bd_left", { n: v.left_out })}</p>}
           {issues.length === 0 ? <p className="b-none">{both("none")}</p> : issues.slice(0, 4).map((i: any) => (
             <div key={i.id} className="b-issue"><b>{t(`cat_${TYPE_CAT[i.type] || "other"}`)}</b><span>{i.lane || v.village} · {i.affected} {t("homes")}</span><em>{t(`st_${i.status}`)}</em></div>
           ))}

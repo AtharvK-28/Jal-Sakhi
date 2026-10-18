@@ -225,6 +225,29 @@ JJM trains five women in every village to test water with a field test kit (FTK)
   Pump and source works are counted as homes *protected*, apart from homes *restored*. Unit costs are
   indicative and stated in `core/invest.py`, to be replaced by the state's Schedule of Rates.
 
+## The problems a village actually has
+
+- **A motor on the tap.** Some homes fit an electric suction pump on their tap at the start of supply; they fill
+  a drum fast and the homes after them on the lane go dry. A metered tap drawing more than 2.2 times the village's
+  typical filling flow (and at least 18 L/min) raises *Suspected suction pump at HH-0xx*, with the downstream homes
+  affected. The lane's extra flow and lost pressure are then explained by it, so no leak hunt is raised. It is
+  routed to the Pani Samiti, worded as suspected. Demo scenario: *Suction pump on a tap*.
+- **First flush.** When a supply cut, pressure loss, leak or suction pump on a lane clears while water is
+  flowing, the lane's households are told, in their language, to let the tap run 2 minutes before filling drinking
+  water: an empty or depressurised pipe can draw dirt in.
+- **Homes left out, and reported against observed** (*Reported vs observed* page; also the households page,
+  the Pani Samiti phone, and a count on the village board). One row per household per day (`hh_daily`):
+  homes that failed the JJM test on 5 of the last 7 days, homes with no water for 14 days, and for each village
+  the connections IMIS would count and its Har Ghar Jal status, against the homes reliably served
+  (functional on 24 of the last 30 days). A certified village below 90%, or with dry homes, is flagged
+  *certification at risk*. The 30 days before the simulation starts are seeded and labelled simulated.
+- **The hours it costs.** Household-days without enough tap water, multiplied by an assumed fetching time that
+  the user sets. Replace the assumption with the NSS 76th round (2018) figure before citing it.
+- **Proof of repair.** A photo of the work, stamped with the time and the phone's location, is kept with the
+  incident and listed in its closure evidence.
+- **Families against sensors.** The households page compares the daily "did water come?" answers with what the
+  sensors inferred, and lists the disagreements.
+
 ## Phone alerts
 
 Every incident also goes to a phone (**Phone alerts** page; `backend/app/core/alerts.py`). Routing follows
