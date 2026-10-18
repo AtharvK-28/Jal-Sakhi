@@ -61,8 +61,9 @@ def ensure_frontend(rebuild: bool):
 
 
 def main():
+    default_port = int(os.environ.get("PORT", 8000))
     ap = argparse.ArgumentParser(description="Start JalSakhi AI")
-    ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--port", type=int, default=default_port)
     ap.add_argument("--host", default="0.0.0.0", help="use 127.0.0.1 to keep it off the network")
     ap.add_argument("--rebuild", action="store_true")
     ap.add_argument("--test", action="store_true")

@@ -157,10 +157,22 @@ async def lifespan(_app: FastAPI):
     task.cancel()
 
 
-app = FastAPI(title=C.APP_NAME, version=C.APP_VERSION, lifespan=lifespan,
-              description="Rural water service monitoring PoC. All telemetry is simulated; integrations are sandboxed.")
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-                   allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(
+    title=C.APP_NAME,
+    version=C.APP_VERSION,
+    lifespan=lifespan,
+    description="Rural water service monitoring PoC. All telemetry is simulated; integrations are sandboxed.",
+)
+
+cors_env = os.environ.get("CORS_ORIGINS", "*")
+cors_origins = [o.strip() for o in cors_env.split(",") if o.strip()] if cors_env != "*" else ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True if "*" not in cors_origins else False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.middleware("http")

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { api, getSession } from "./api";
+import { api, getSession, resolveUrl } from "./api";
 
 type Scope = { level: string; id: string };
 type Live = {
@@ -58,7 +58,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
 
   const connect = useCallback(() => {
     es.current?.close();
-    const src = new EventSource(`/api/stream?village=${village}&token=${encodeURIComponent(session.token)}`);
+    const src = new EventSource(resolveUrl(`/api/stream?village=${village}&token=${encodeURIComponent(session.token)}`));
     src.onopen = () => setConnected(true);
     src.onmessage = (e) => { setSnap(JSON.parse(e.data)); setConnected(true); };
     src.onerror = () => setConnected(false);

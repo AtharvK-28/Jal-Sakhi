@@ -18,6 +18,13 @@ export function getSession(): Session | null {
 export function setSession(s: Session) { localStorage.setItem(KEY, JSON.stringify(s)); }
 export function clearSession() { localStorage.removeItem(KEY); }
 
+export const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+
+export function resolveUrl(path: string): string {
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 export async function api(path: string, opts: { method?: string; body?: any; form?: FormData; auth?: boolean } = {}): Promise<any> {
   const headers: Record<string, string> = {};
   const s = getSession();
@@ -25,7 +32,7 @@ export async function api(path: string, opts: { method?: string; body?: any; for
   let body: BodyInit | undefined;
   if (opts.form) body = opts.form;
   else if (opts.body !== undefined) { headers["Content-Type"] = "application/json"; body = JSON.stringify(opts.body); }
-  const res = await fetch(path, { method: opts.method || (body ? "POST" : "GET"), headers, body });
+  const res = await fetch(resolveUrl(path), { method: opts.method || (body ? "POST" : "GET"), headers, body });
   if (res.status === 401 && s && opts.auth !== false) {
     clearSession();
     window.location.href = "/";
@@ -43,7 +50,7 @@ export async function api(path: string, opts: { method?: string; body?: any; for
 /** Fetch a file with the session's token and hand it to the browser as a download. */
 export async function download(path: string, fallbackName: string): Promise<string> {
   const s = getSession();
-  const res = await fetch(path, { headers: s ? { Authorization: `Bearer ${s.token}` } : {} });
+  const res = await fetch(resolveUrl(path), { headers: s ? { Authorization: `Bearer ${s.token}` } : {} });
   if (!res.ok) throw new Error(`Download failed (${res.status})`);
   const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1] || fallbackName;
   const url = URL.createObjectURL(await res.blob());

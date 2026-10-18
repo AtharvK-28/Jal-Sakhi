@@ -1,0 +1,9 @@
+.git/
+DemoVideo/
+frontend/node_modules/
+backend/data/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
