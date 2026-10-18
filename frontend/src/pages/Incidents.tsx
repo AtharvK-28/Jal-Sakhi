@@ -57,6 +57,18 @@ export function Incidents() {
   );
 }
 
+// the nine parameters of the JJM field test kit (as in backend/app/core/sampling.py), read as colour-chart steps
+const KIT: { key: string; label: string; unit: string; steps: number[] }[] = [
+  { key: "ph", label: "pH", unit: "", steps: [5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0] },
+  { key: "alkalinity_mgl", label: "Total alkalinity", unit: "mg/L", steps: [0, 100, 200, 300, 400, 600, 800] },
+  { key: "chloride_mgl", label: "Chloride", unit: "mg/L", steps: [0, 100, 250, 500, 1000, 1500] },
+  { key: "hardness_mgl", label: "Total hardness", unit: "mg/L", steps: [0, 100, 200, 300, 400, 600, 800] },
+  { key: "nitrate_mgl", label: "Nitrate", unit: "mg/L", steps: [0, 10, 20, 45, 100] },
+  { key: "fluoride_mgl", label: "Fluoride", unit: "mg/L", steps: [0, 0.5, 1.0, 1.5, 2.0, 3.0] },
+  { key: "iron_mgl", label: "Iron", unit: "mg/L", steps: [0, 0.1, 0.3, 0.5, 1.0, 2.0] },
+  { key: "chlorine_mgl", label: "Free residual chlorine", unit: "mg/L", steps: [0, 0.1, 0.2, 0.5, 1.0, 2.0] },
+];
+
 function IncidentDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const { clock, refresh } = useLive();
   const role = getSession()!.user.role;
@@ -65,7 +77,7 @@ function IncidentDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const [text, setText] = useState("");
   const [assignee, setAssignee] = useState("");
   const [busy, setBusy] = useState(false);
-  const [ftk, setFtk] = useState<any>({ turbidity_ntu: "", chlorine_mgl: "", ph: "", h2s_positive: false, sample_point: "Tank outlet" });
+  const [ftk, setFtk] = useState<any>({ h2s_positive: false, sample_point: "Tank outlet" });
   useEffect(() => { setMode(null); setText(""); }, [id]);
   useEffect(() => { if (d && !assignee) setAssignee(d.suggested_assignee); }, [d, assignee]);
   if (error) return <Drawer title="Incident" onClose={onClose}><Empty icon={<AlertTriangle />}>{error}</Empty></Drawer>;
@@ -81,15 +93,15 @@ function IncidentDrawer({ id, onClose }: { id: string; onClose: () => void }) {
     setBusy(false);
   };
   const sampleFtk = async () => {
-    try { const s = await api(`/api/quality/ftk-sample?village=${d.village_id}`); setFtk({ ...ftk, ...s.params }); } catch (e: any) { toast(e.message, true); }
+    try { const s = await api(`/api/quality/ftk-sample?village=${d.village_id}&point=${encodeURIComponent(ftk.sample_point)}`); setFtk({ ...ftk, ...s.params }); } catch (e: any) { toast(e.message, true); }
   };
   const submitFtk = async () => {
     setBusy(true);
     try {
       const params: any = { h2s_positive: !!ftk.h2s_positive };
-      for (const k of ["turbidity_ntu", "chlorine_mgl", "ph"]) if (ftk[k] !== "" && ftk[k] !== null) params[k] = Number(ftk[k]);
+      for (const p of KIT) if (ftk[p.key] !== "" && ftk[p.key] != null) params[p.key] = Number(ftk[p.key]);
       const r = await api("/api/quality/tests", { body: { village_id: d.village_id, sample_point: ftk.sample_point, kind: "FTK", incident_id: d.id, params } });
-      toast(r.result === "pass" ? `FTK test ${r.id}: PASS` : `FTK test ${r.id}: FAIL. Lab confirmation requested.`, r.result !== "pass");
+      toast(r.result === "pass" ? `FTK test ${r.id}: within limits` : `FTK test ${r.id}: outside the limits (${r.failed_checks.join("; ")}). Lab confirmation requested.`, r.result !== "pass");
       setMode(null); reload(); refresh();
     } catch (e: any) { toast(e.message, true); }
     setBusy(false);
@@ -143,9 +155,9 @@ function IncidentDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             <div className="row between"><b className="row"><FlaskConical size={16} color="var(--brand)" />Field Test Kit result</b><button className="btn soft sm" onClick={sampleFtk}>DEMO: take a simulated sample</button></div>
             <div className="grid g4" style={{ marginTop: 10 }}>
               <div><label className="f">Sample point</label><input className="input" value={ftk.sample_point} onChange={(e) => setFtk({ ...ftk, sample_point: e.target.value })} /></div>
-              <div><label className="f">Turbidity (NTU)</label><input className="input" inputMode="decimal" value={ftk.turbidity_ntu} onChange={(e) => setFtk({ ...ftk, turbidity_ntu: e.target.value })} /></div>
-              <div><label className="f">Residual Cl (mg/L)</label><input className="input" inputMode="decimal" value={ftk.chlorine_mgl} onChange={(e) => setFtk({ ...ftk, chlorine_mgl: e.target.value })} /></div>
-              <div><label className="f">pH</label><input className="input" inputMode="decimal" value={ftk.ph} onChange={(e) => setFtk({ ...ftk, ph: e.target.value })} /></div>
+              {KIT.map((p) => <div key={p.key}><label className="f">{p.label}{p.unit ? ` (${p.unit})` : ""}</label>
+                <select className="select" value={ftk[p.key] ?? ""} onChange={(e) => setFtk({ ...ftk, [p.key]: e.target.value === "" ? null : Number(e.target.value) })}>
+                  <option value="">not read</option>{p.steps.map((v) => <option key={v} value={v}>{v}</option>)}</select></div>)}
             </div>
             <label className="row sm" style={{ margin: "10px 0", cursor: "pointer" }}><input type="checkbox" checked={!!ftk.h2s_positive} onChange={(e) => setFtk({ ...ftk, h2s_positive: e.target.checked })} />H2S vial turned black (possible bacteriological contamination)</label>
             <div className="row"><button className="btn sm" disabled={busy} onClick={submitFtk}>Save test result</button><button className="btn ghost sm" onClick={() => setMode(null)}>Cancel</button></div>
