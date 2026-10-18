@@ -5,6 +5,8 @@ import {
   Smartphone, Sparkles, Users, WifiOff, ZapOff,
 } from "lucide-react";
 import { api } from "../lib/api";
+import { isPresenting, setPresenting } from "../lib/present";
+import { startTour } from "./Tour";
 import { useLive } from "../lib/live";
 import { Drawer, toast } from "./ui";
 
@@ -52,7 +54,7 @@ export function DemoPanel() {
 
   return (
     <>
-      <button className="fab" onClick={() => setOpen(true)}><SlidersHorizontal />Demo controls</button>
+      <button className="btn sm demo-btn" onClick={() => setOpen(true)} title="Inject faults, move the clock, reset"><SlidersHorizontal />Demo</button>
       {open && (
         <Drawer title={<span className="row"><span className="pill demo">DEMO</span>Scenario & clock controls</span>} sub={`Faults are injected into the simulated scheme at ${name}. Detection sees only the resulting sensor readings and citizen reports.`} onClose={() => setOpen(false)}>
           <div className="card pad">
@@ -100,6 +102,23 @@ export function DemoPanel() {
               </div>
             );
           })}
+
+          <div className="card pad row between wrap" style={{ background: "var(--info-bg)" }}>
+            <div><b>Guided tour</b><div className="sm ink2">One leak through the whole loop in eight live steps, about two minutes. Resets the demo first.</div></div>
+            <button className="btn sm" onClick={() => { setOpen(false); startTour(); }}><Play />Start the tour</button>
+          </div>
+
+          <div className="card pad">
+            <div className="row" style={{ alignItems: "flex-start", gap: 16 }}>
+              <div className="grow"><b>Village display board</b><div className="sm ink2">Full-screen page for a TV at the Panchayat office, in the village's language. No sign-in.</div></div>
+              <a className="btn soft sm" href={`/board/${village}`} target="_blank" rel="noreferrer">Open the board</a>
+            </div>
+          </div>
+
+          <div className="card pad row between wrap">
+            <div><b>Presentation mode</b><div className="sm ink2">For screenshots and a projector: a small demo badge instead of the ribbon, larger small text. Shortcut Shift+P.</div></div>
+            <button className="btn soft sm" onClick={() => { setPresenting(!isPresenting()); setOpen(false); }}>{isPresenting() ? "Turn off" : "Turn on"}</button>
+          </div>
 
           <div className="card pad">
             <div className="row" style={{ alignItems: "flex-start", gap: 16 }}>

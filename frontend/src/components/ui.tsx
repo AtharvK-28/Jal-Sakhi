@@ -69,7 +69,7 @@ export function Kpi({ icon, label, value, unit, sub, tone, children }: { icon?: 
   return (
     <div className={`card kpi ${tone ? `t-${tone}` : ""}`}>
       <div className="lab">{icon}{label}</div>
-      <div className="val">{value}{unit && <small>{unit}</small>}</div>
+      <div className="val">{value}{unit && value !== "–" && <small>{unit}</small>}</div>
       {sub && <div className="sub">{sub}</div>}
       {children}
     </div>
@@ -81,11 +81,11 @@ export function SevPill({ sev }: { sev: string }) {
 }
 export function StatusPill({ status }: { status: string }) {
   const cls = status === "closed" ? "good" : status === "open" ? "high" : status === "resolved_pending_verification" ? "info" : "medium";
-  return <span className={`pill ${cls}`}><span className="d" />{INC_STATUS[status] || status}</span>;
+  return <span className={`pill quiet ${cls}`}><span className="d" />{INC_STATUS[status] || status}</span>;
 }
 export function OriginPill({ origin }: { origin: string }) {
   const o = ORIGIN[origin] || ORIGIN.sensor;
-  return <span className={`pill ${o.cls}`}>{o.label}</span>;
+  return <span className={`pill quiet ${o.cls === "ai" ? "o-ai" : ""}`}>{o.label}</span>;
 }
 export function SupplyPill({ s }: { s: string }) {
   const Icon = s === "ok" ? Droplets : s === "low" ? Gauge : s === "dry" ? AlertTriangle : s === "idle" ? Moon : CircleHelp;

@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS id_mappings (
 
 CREATE TABLE IF NOT EXISTS wq_tests (
   id TEXT PRIMARY KEY, village_id TEXT, sample_point TEXT, kind TEXT, params JSON, result TEXT, tested_by TEXT,
-  ts TEXT, incident_id TEXT, lab_status TEXT, note TEXT);
+  ts TEXT, incident_id TEXT, lab_status TEXT, note TEXT, photo TEXT);
 
 CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT, village_id TEXT, branch_id TEXT, household_id TEXT, kind TEXT,

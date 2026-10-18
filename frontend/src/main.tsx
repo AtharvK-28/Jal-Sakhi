@@ -3,8 +3,10 @@ import ReactDOM from "react-dom/client";
 import "@fontsource-variable/plus-jakarta-sans";
 import "./styles.css";
 import { App } from "./App";
+import { initPresentation } from "./lib/present";
 
 document.documentElement.setAttribute("data-theme", localStorage.getItem("jalsakhi.theme") || "light");
+initPresentation();
 
 // Installable app that opens offline (public/sw.js). Not in development: Vite serves modules the worker would cache.
 if ("serviceWorker" in navigator && import.meta.env.PROD) {

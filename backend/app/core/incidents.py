@@ -242,7 +242,10 @@ class IncidentManager:
             got.append("FTK re-test passed")
         if ev.get("lab_pass"):
             got.append("laboratory result within limits (WQMIS)")
-        if inc["category"] == "quality":
+        if inc.get("origin") == "ftk":  # raised by a failed field test: a passing re-test (or lab result) is the proof
+            ok = bool(ev.get("ftk_pass") or ev.get("lab_pass")) and ev.get("lab_pass") is not False
+            missing = "a passing field re-test or laboratory result"
+        elif inc["category"] == "quality":
             ok = bool(inc.get("recovered_at")) and bool(ev.get("ftk_pass") or ev.get("lab_pass")) and ev.get("lab_pass") is not False
             missing = ("sensor readings back within limits AND a passing FTK re-test or laboratory result"
                        + (" (the laboratory found the water outside the limits: a new sample must pass)" if ev.get("lab_pass") is False else ""))

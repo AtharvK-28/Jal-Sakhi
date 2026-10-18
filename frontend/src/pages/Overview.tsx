@@ -1,14 +1,14 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Activity, AlertTriangle, BadgeCheck, CheckCircle2, ChevronRight, Cpu, Droplets, FlaskConical, Gauge, HeartHandshake, MessageSquareText,
+  Activity, AlertTriangle, CheckCircle2, ChevronRight, Droplets, FlaskConical, Gauge, HeartHandshake, MessageSquareText,
   Network, Radio, ShieldQuestion, Siren, TrendingUp, Users, Waves as WavesIcon,
 } from "lucide-react";
 import { useLive, usePoll } from "../lib/live";
 import { Empty, Kpi, LiquidGauge, Loader, StatusBar, SupplyPill, Waves } from "../components/ui";
 import { LineChart, Sparkline } from "../components/charts";
 import { Twin, TwinLegend } from "../components/Twin";
-import { Feed, IncidentQueue } from "../components/panels";
+import { AttentionStrip, Feed, IncidentQueue } from "../components/panels";
 import { HouseholdDrawer } from "./Households";
 import { dayMon, fromMinute, n0, n1, scoreColor, scoreTone } from "../lib/format";
 
@@ -28,7 +28,7 @@ function VillageOverview() {
   const mine = (snap.incidents || []).filter((i: any) => i.village_id === v.id);
   const crit = mine.some((i: any) => i.severity === "critical");
   const fn = k.functional;
-  const tone = scoreTone(k.score);
+  const tone = scoreTone(fn ? fn.pct : k.score);
   const feed = (snap.feed || []).filter((f: any) => !f.village_id || f.village_id === v.id);
   const nowMin = Math.floor(new Date(clock.iso).getTime() / 60000);
 
@@ -54,27 +54,29 @@ function VillageOverview() {
               <span className="chip" title="Placeholder identifier">IMIS {v.ext.imis_habitation_id}</span>
               <span className="chip">{k.households} FHTCs · {v.branches.length} lanes</span>
               <span className="chip">{k.devices_total} sensors · {v.households.filter((h: any) => h.m).length} metered homes</span>
+              <span className="chip">service score {n0(k.score)}</span>
+              <a className="chip" style={{ color: "#fff" }} href={`/board/${v.id}`} target="_blank" rel="noreferrer">Village display board ↗</a>
             </div>
           </div>
           <div className="row" style={{ gap: 16, background: "rgba(255,255,255,.14)", padding: "12px 18px 12px 12px", borderRadius: 20, border: "1px solid rgba(255,255,255,.22)" }}>
-            <LiquidGauge value={k.score} size={118} label="service score" tone={tone} />
+            <LiquidGauge value={fn ? fn.pct : null} size={118} label="functional" tone={tone} />
             <div style={{ fontSize: 12.5, lineHeight: 1.75 }}>
-              <div style={{ fontWeight: 750, fontSize: 15 }}>{tone.word}</div>
-              {[["Supply", k.score_parts.supply], ["Quantity", k.score_parts.quantity], ["Quality", k.score_parts.quality], ["Data health", k.score_parts.data]].map(([l, p]) => (
-                <div key={l as string} className="row" style={{ gap: 8 }}><span style={{ width: 74, opacity: 0.9 }}>{l}</span><div className="progress" style={{ width: 70, height: 5 }}><i style={{ width: `${p}%` }} /></div><b className="num">{p}</b></div>
+              <div style={{ fontWeight: 750, fontSize: 15 }}>Functional taps</div>
+              <div style={{ opacity: 0.9, marginBottom: 2 }}>JJM test, {fn?.basis === "today" ? "today" : "previous day"}</div>
+              {[["Regular", fn?.regular_pct], ["Quantity", fn?.quantity_pct], ["Quality", fn?.quality_pct]].map(([l, p]) => (
+                <div key={l as string} className="row" style={{ gap: 8 }}><span style={{ width: 62, opacity: 0.9 }}>{l}</span><div className="progress" style={{ width: 70, height: 5 }}><i style={{ width: `${p ?? 0}%` }} /></div><b className="num">{p != null ? n0(p as number) : "–"}</b></div>
               ))}
             </div>
           </div>
         </div>
         <Waves />
       </section>
+      <AttentionStrip items={mine} />
 
-      <div className="grid kpis" style={{ margin: "18px 0" }}>
+      <div className="grid kpis" style={{ margin: "16px 0 18px" }}>
         <Kpi icon={<Droplets />} label={clock.in_window ? "Receiving water now" : "Supply status"} tone={k.counts.dry ? "crit" : k.counts.low ? "warn" : undefined}
           value={clock.in_window ? k.counts.ok : "Off"} unit={clock.in_window ? `/ ${k.households} homes` : "scheduled"}
           sub={clock.in_window ? <>{k.counts.low} low pressure · {k.counts.dry} no water · {k.counts.unknown} unknown</> : `Next window ${clock.next_window}`} />
-        <Kpi icon={<BadgeCheck />} label="Functional taps (JJM 3-test)" tone={fn && fn.pct < 80 ? "warn" : "good"} value={fn ? n1(fn.pct, 0) : "–"} unit="%"
-          sub={fn ? <>{fn.basis === "today" ? `today, ${fn.windows} window${fn.windows > 1 ? "s" : ""} scored` : "previous day"} · regular {n0(fn.regular_pct)} · quantity {n0(fn.quantity_pct)} · quality {n0(fn.quality_pct)}</> : "scored when a window closes"} />
         <Kpi icon={<Gauge />} label="Supplied today (est.)" value={n1(k.lpcd_avg, 0)} unit={`/ ${k.lpcd_norm} lpcd`} sub="litres per person so far; norm is 55">
           <div className="bar" style={{ marginTop: 8 }}><i style={{ width: `${Math.min(100, (k.lpcd_avg / k.lpcd_norm) * 100)}%` }} /></div>
         </Kpi>
@@ -168,7 +170,7 @@ function UnitOverview() {
   if (error) return <div className="page"><Empty icon={<AlertTriangle />}>{error}</Empty></div>;
   if (!data) return <div className="page"><Loader /></div>;
   const t = data.totals;
-  const tone = scoreTone(t.score);
+  const tone = scoreTone(t.functional_pct ?? t.score);
   const kids: any[] = data.children.length ? data.children : data.villages;
   const childLabel = scope.level === "state" ? "District" : scope.level === "district" ? "Block" : "Gram Panchayat / village";
   const inWin = snap?.clock?.in_window;
@@ -180,28 +182,28 @@ function UnitOverview() {
           <div className="grow" style={{ minWidth: 260 }}>
             <div className="meta" style={{ textTransform: "capitalize" }}>{scope.level} view · rural water service delivery</div>
             <h1 style={{ marginTop: 4 }}>{data.name}{scope.level !== "state" ? ` ${scope.level}` : ""}</h1>
+            <p style={{ fontSize: 15, marginTop: 8, maxWidth: 560, opacity: 0.95 }}>{n0(t.households)} household tap connections in {t.villages} village schemes, each one scored on the JJM functionality test: regular supply, adequate quantity, prescribed quality.</p>
             <div className="chips">
-              <span className="chip">{t.villages} village schemes</span><span className="chip">{n0(t.households)} household taps (FHTC)</span>
-              <span className="chip">{t.open} open incidents</span><span className="chip">{t.complaints_open} citizen reports open</span>
+              <span className="chip">service score {n0(t.score)}</span><span className="chip">{n1(t.lpcd, 0)} litres per person today</span>
+              <span className="chip">national FA 2024: 76% functional</span>
             </div>
-            <p className="meta" style={{ marginTop: 12, maxWidth: 560 }}>Every number rolls up from household-level status in each village. Click a row to drill down to the lane and the tap.</p>
           </div>
           <div className="row" style={{ gap: 16, background: "rgba(255,255,255,.14)", padding: "12px 18px 12px 12px", borderRadius: 20, border: "1px solid rgba(255,255,255,.22)" }}>
-            <LiquidGauge value={t.score} size={118} label="service score" tone={tone} />
-            <div style={{ fontSize: 12.5 }}><div style={{ fontWeight: 750, fontSize: 15 }}>{tone.word}</div><div style={{ opacity: 0.9, maxWidth: 150, marginTop: 4 }}>household-weighted across {t.villages} schemes</div></div>
+            <LiquidGauge value={t.functional_pct} size={118} label="functional" tone={tone} />
+            <div style={{ fontSize: 12.5 }}><div style={{ fontWeight: 750, fontSize: 15 }}>Functional taps</div><div style={{ opacity: 0.9, maxWidth: 150, marginTop: 4 }}>household-weighted across {t.villages} schemes</div></div>
           </div>
         </div>
         <Waves />
       </section>
+      <AttentionStrip items={data.incidents} names={names} />
 
-      <div className="grid kpis" style={{ margin: "18px 0" }}>
-        <Kpi icon={<BadgeCheck />} label="Functional taps (JJM 3-test)" tone={t.functional_pct < 80 ? "warn" : "good"} value={n1(t.functional_pct, 0)} unit="%" sub="regular + adequate + quality, household-weighted" />
+      <div className="grid kpis" style={{ margin: "16px 0 18px" }}>
         <Kpi icon={<Droplets />} label={inWin ? "Receiving water now" : "Supply status"} value={inWin ? n0(t.counts.ok) : "Off"} unit={inWin ? `/ ${n0(t.households)}` : "scheduled"} tone={t.counts.dry ? "crit" : t.counts.low ? "warn" : undefined}
           sub={inWin ? `${t.counts.low || 0} low · ${t.counts.dry || 0} dry · ${t.counts.unknown || 0} unknown` : "between supply windows"} />
         <Kpi icon={<Siren />} label="Open incidents" tone={t.critical ? "crit" : t.open ? "warn" : "good"} value={t.open} sub={`${t.critical} critical`} />
         <Kpi icon={<MessageSquareText />} label="Citizen reports open" value={t.complaints_open} tone={t.complaints_open ? "warn" : undefined} sub="across all channels" />
-        <Kpi icon={<FlaskConical />} label="Quality checks pending" value={t.quality_flags} tone={t.quality_flags ? "crit" : "good"} sub="villages needing FTK verification" />
-        <Kpi icon={<Cpu />} label="Sensor issues" value={t.devices_problem} tone={t.devices_problem ? "warn" : "good"} sub="stale or offline devices" />
+        <Kpi icon={<FlaskConical />} label="Checks pending" value={t.quality_flags} tone={t.quality_flags ? "crit" : t.devices_problem ? "warn" : undefined}
+          sub={`${t.quality_flags ? `${t.quality_flags} village${t.quality_flags > 1 ? "s" : ""} need a water test` : "no water test due"} · ${t.devices_problem} sensor${t.devices_problem === 1 ? "" : "s"} silent`} />
       </div>
 
       <div className="grid g-main">

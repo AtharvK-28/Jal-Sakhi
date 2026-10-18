@@ -44,7 +44,7 @@ export const CAT_LABEL: Record<string, string> = {
 export const ORIGIN: Record<string, { label: string; cls: string }> = {
   sensor: { label: "Sensor rule", cls: "info" }, ml: { label: "AI model", cls: "ai" },
   forecast: { label: "AI forecast", cls: "ai" }, citizen: { label: "Citizen reports", cls: "high" },
-  history: { label: "History", cls: "low" },
+  history: { label: "History", cls: "low" }, ftk: { label: "Field test (Jal Sakhi)", cls: "info" },
 };
 export const LANG_NAME: Record<string, string> = { en: "English", hi: "हिन्दी", mr: "मराठी", bn: "বাংলা", ta: "தமிழ்", te: "తెలుగు" };
 

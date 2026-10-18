@@ -788,3 +788,76 @@ def test_wqmis_lab_result_closes_the_loop(client, admin):
     assert notes[0]["kind"] == "advisory_cleared" and any(n["kind"] == "advisory_quality" for n in notes)
     unknown = client.post("/api/quality/lab-results", headers=admin, json={"results": [{"sample_id": "WQ-9999", "params": {}}]}).json()
     assert "no JalSakhi test" in unknown["imported"][0]["error"]
+
+
+# ------------------------------------------------------- Jal Sakhi field testing
+def test_ftk_reads_the_nine_kit_parameters_against_is10500():
+    from app.core import sampling
+    ok = {"ph": 7.0, "alkalinity_mgl": 200, "chloride_mgl": 100, "hardness_mgl": 300, "nitrate_mgl": 10, "fluoride_mgl": 0.5,
+          "iron_mgl": 0.1, "chlorine_mgl": 0.5, "h2s_positive": False}
+    result, fails, rows = sampling.judge(ok)
+    assert result == "pass" and not fails and len(rows) == 9
+    assert next(r for r in rows if r["key"] == "hardness_mgl")["status"] == "caution"  # above acceptable, within permissible
+    assert sampling.judge({**ok, "fluoride_mgl": 2.0})[0] == "fail"
+    assert sampling.judge({**ok, "chlorine_mgl": 0.1})[0] == "fail"
+    assert sampling.judge({**ok, "h2s_positive": None})[0] == "pending"  # the vial takes a day or two
+    assert [p["key"] for p in sampling.FTK_PARAMS] == ["ph", "alkalinity_mgl", "chloride_mgl", "hardness_mgl", "nitrate_mgl",
+                                                       "fluoride_mgl", "iron_mgl", "chlorine_mgl"]
+
+
+def test_jal_sakhi_tests_where_risk_is_highest_and_a_failure_reaches_the_lane(client, admin):
+    tester = login(client, "jalsakhi.pimpalwadi")
+    assert client.get("/api/quality/plan?village=VLG-DK", headers=tester).status_code == 403  # her own village only
+    plan = client.get(f"/api/quality/plan?village={PW}", headers=tester).json()
+    assert len(plan["points"]) == 6 and len(plan["params"]) == 8
+    scenario(client, admin, "leak")  # School Road
+    steps(14)
+    plan = client.get(f"/api/quality/plan?village={PW}", headers=tester).json()
+    top = plan["points"][0]
+    assert top["name"] == "School Road tail-end tap" and top["today"] and any(r["code"] == "leak" for r in top["reasons"])
+    reading = client.get(f"/api/quality/ftk-sample?village={PW}&point=School Road tail-end tap", headers=tester).json()["params"]
+    assert reading["h2s_positive"] is True
+    t = client.post("/api/quality/tests", headers=tester, json={"village_id": PW, "sample_point": top["name"], "kind": "FTK", "params": reading}).json()
+    assert t["result"] == "fail" and t["lab_status"] == "requested" and t["incident_id"]
+    d = client.get(f"/api/incidents/{t['incident_id']}", headers=admin).json()
+    assert d["origin"] == "ftk" and d["branch_id"] == "PW-B2" and d["type"] == "QUALITY_VERIFY"
+    notes = client.get("/api/citizen/notifications?household_id=PW-HH-025").json()
+    assert any(n["kind"] == "advisory_quality" for n in notes)  # School Road families told to boil water
+    assert not any(n["kind"] == "advisory_quality" for n in client.get("/api/citizen/notifications?household_id=PW-HH-005").json())
+    assert any(r["record_type"] == "water_quality_test" and r["entity_id"] == t["id"] for r in client.get("/api/sync", headers=admin).json()["outbox"])
+
+    retest = {**reading, "chlorine_mgl": 0.5, "h2s_positive": False, "iron_mgl": 0.1}
+    ok = client.post("/api/quality/tests", headers=tester, json={"village_id": PW, "sample_point": top["name"], "kind": "FTK",
+                                                                   "params": retest, "incident_id": t["incident_id"]}).json()
+    assert ok["result"] == "pass"
+    assert client.patch(f"/api/incidents/{t['incident_id']}", headers=admin, json={"action": "repair", "note": "Line flushed, dosing restored"}).status_code == 200
+    assert client.patch(f"/api/incidents/{t['incident_id']}", headers=admin, json={"action": "close"}).json()["status"] == "closed"
+
+
+def test_h2s_vial_completes_the_test_later(client, admin):
+    tester = login(client, "jalsakhi.pimpalwadi")
+    p = {"ph": 7.0, "alkalinity_mgl": 100, "chloride_mgl": 100, "hardness_mgl": 200, "nitrate_mgl": 10, "fluoride_mgl": 0.5,
+         "iron_mgl": 0.1, "chlorine_mgl": 0.5, "h2s_positive": None}
+    t = client.post("/api/quality/tests", headers=tester, json={"village_id": PW, "sample_point": "Tank outlet", "kind": "FTK", "params": p}).json()
+    assert t["result"] == "pending" and t["lab_status"] is None
+    done = client.patch(f"/api/quality/tests/{t['id']}/h2s", headers=tester, json={"positive": False}).json()
+    assert done["result"] == "pass" and done["params"]["h2s_positive"] is False
+    assert client.patch(f"/api/quality/tests/{t['id']}/h2s", headers=tester, json={"positive": True}).status_code == 409
+    up = client.post(f"/api/quality/tests/{t['id']}/photo", headers=tester, files={"photo": ("kit.jpg", b"\xff\xd8\xff" + b"0" * 32, "image/jpeg")})
+    assert up.status_code == 201 and up.json()["photo"].startswith("/uploads/")
+
+
+def test_investment_planner_buys_the_most_functional_taps_per_rupee(client, admin):
+    scenario(client, admin, "leak")
+    steps(14)
+    small = client.get("/api/invest?level=state&id=ST-MH&budget=100000", headers=admin).json()
+    big = client.get("/api/invest?level=state&id=ST-MH&budget=5000000", headers=admin).json()
+    assert small["households"] == big["households"] and small["spent"] <= 100000
+    assert big["gained"] >= small["gained"] >= 0 and big["pct_after"] >= big["pct_now"]
+    per = [o["per_lakh"] for o in big["options"]]
+    assert per == sorted(per, reverse=True)  # best value first
+    assert all(o["cost"] > 0 and o["homes"] > 0 and o["why"] for o in big["options"])
+    assert {v["village_id"] for v in big["villages"]} == {v["id"] for v in __import__("app.seed", fromlist=["VILLAGES"]).VILLAGES}
+    op = login(client, "naljal.mitra")
+    assert client.get("/api/invest?level=state&id=ST-MH", headers=op).status_code == 403
+    assert client.get(f"/api/invest?level=village&id={PW}", headers=op).status_code == 200

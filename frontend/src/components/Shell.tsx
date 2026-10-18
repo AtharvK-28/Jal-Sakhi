@@ -1,13 +1,14 @@
 import { useMemo, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
-  BarChart3, BellRing, ChevronRight, Cpu, Droplets, FlaskConical, Home, LayoutDashboard, LogOut, Map as MapIcon, Menu, MessageSquareText,
+  BarChart3, BellRing, ChevronRight, PiggyBank, Cpu, Droplets, FlaskConical, Home, LayoutDashboard, LogOut, Map as MapIcon, Menu, MessageSquareText,
   Moon, Network, Pause, RefreshCw, ShieldCheck, Siren, Smartphone, Sparkles, Sun, Volume2, VolumeX, WifiOff, Wrench,
 } from "lucide-react";
 import { api, clearSession, getSession } from "../lib/api";
 import { useLive } from "../lib/live";
 import { Drop, Modal, ToastHost, toast } from "./ui";
 import { DemoPanel } from "./DemoPanel";
+import { Tour } from "./Tour";
 
 const NAV = [
   { grp: "Monitor" },
@@ -24,6 +25,7 @@ const NAV = [
   { grp: "Intelligence" },
   { to: "/app/ai", icon: Sparkles, label: "AI insights" },
   { to: "/app/analytics", icon: BarChart3, label: "Analytics" },
+  { to: "/app/planner", icon: PiggyBank, label: "Investment planner" },
   { grp: "Platform" },
   { to: "/app/integration", icon: RefreshCw, label: "IMIS / Sujal Gaon sync" },
   { to: "/app/devices", icon: Cpu, label: "Devices & hardware" },
@@ -48,7 +50,6 @@ export function Shell() {
     incidents: snap?.incidents?.length || 0,
     complaints: (snap?.summary || []).reduce((a: number, v: any) => a + (v.complaints_open || 0), 0),
   };
-  const bubbles = useMemo(() => Array.from({ length: 11 }, (_, i) => ({ left: `${6 + ((i * 37) % 88)}%`, size: 5 + ((i * 7) % 12), dur: 9 + ((i * 5) % 11), delay: -((i * 3) % 14) })), []);
 
   // Breadcrumb path from the state down to the current scope, limited to the user's jurisdiction.
   const crumbs = useMemo(() => {
@@ -94,7 +95,6 @@ export function Shell() {
       </div>
       <div className="shell">
         <aside className={`side ${open ? "open" : ""}`}>
-          <div className="bubbles" aria-hidden>{bubbles.map((b, i) => <i key={i} style={{ left: b.left, width: b.size, height: b.size, animationDuration: `${b.dur}s`, animationDelay: `${b.delay}s` }} />)}</div>
           <div className="brand"><Drop /><div><b>JalSakhi AI</b><small>Har Ghar Jal · verified</small></div></div>
           <nav className="nav" onClick={() => setOpen(false)}>
             {NAV.map((n, i) => n.grp ? <div className="grp" key={i}>{n.grp}</div> : (
@@ -134,6 +134,7 @@ export function Shell() {
                 </span>
               )}
             </div>
+            <span className="present-badge">Simulated demo data</span>
             {!connected && <span className="pill critical hide-sm"><WifiOff />Reconnecting</span>}
             {clock && (
               <div className="clock" title={clock.in_window ? `Supply window ${clock.window_start}–${clock.window_end}` : `Next supply at ${clock.next_window}`}>
@@ -143,6 +144,7 @@ export function Shell() {
                 {clock.speed > 1 && <span className="tag">{clock.speed}×</span>}
               </div>
             )}
+            <DemoPanel />
             <button className="btn ghost icon" title="Spoken status brief" onClick={() => speak("en")}><Volume2 /></button>
             <button className="btn ghost icon" title="Light / deep-sea theme" onClick={toggle}>{theme === "light" ? <Moon /> : <Sun />}</button>
           </header>
@@ -155,7 +157,7 @@ export function Shell() {
           <Outlet />
         </div>
       </div>
-      <DemoPanel />
+      <Tour />
       <ToastHost />
       {brief && (
         <Modal onClose={() => { window.speechSynthesis?.cancel(); setBrief(null); }}>

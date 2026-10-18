@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, Building2, CalendarCheck2, Eye, HardHat, Landmark, MapPinned, Radar, ShieldCheck, Smartphone, Users, Wrench } from "lucide-react";
+import { ArrowRight, Building2, CalendarCheck2, Eye, HardHat, Landmark, FlaskConical, MapPinned, PlayCircle, Radar, ShieldCheck, Smartphone, Tv, Users, Wrench } from "lucide-react";
 import { api, login } from "../lib/api";
 import { Drop } from "../components/ui";
 
 const ROLES = [
   { user: "naljal.mitra", icon: Wrench, title: "Nal Jal Mitra", sub: "Village operator. Sees alerts for Pimpalwadi, records inspections, repairs and the daily log." },
-  { user: "vwsc.pimpalwadi", icon: Users, title: "VWSC / Gram Panchayat", sub: "Pani Samiti view: village service status, FTK tests, upkeep and accounts, closure and overrides." },
+  { user: "jalsakhi.pimpalwadi", icon: FlaskConical, to: "/tester", title: "Jal Sakhi (water tester)", sub: "One of the five women trained per village: today's risk-ranked test list, the field kit on her phone, in Marathi." },
+  { user: "vwsc.pimpalwadi", icon: Users, to: "/samiti", title: "VWSC / Pani Samiti", sub: "The committee's phone, in Marathi: today's water, what needs a decision, upkeep due, water charges, the Gram Sabha report card." },
   { user: "je.mulshi", icon: HardHat, title: "Block engineer", sub: "Mulshi block: two villages, escalations and crew assignment." },
   { user: "ee.pune", icon: Building2, title: "District engineer", sub: "Pune district roll-up across blocks with GIS and analytics." },
   { user: "state.mh", icon: Landmark, title: "State JJM cell", sub: "State view: all districts, sync status with JJM platforms." },
@@ -31,9 +32,9 @@ export function Landing() {
     api("/api/meta", { auth: false }).then(setMeta).catch(() => {});
   }, []);
   const bubbles = useMemo(() => Array.from({ length: 22 }, (_, i) => ({ left: `${(i * 53) % 100}%`, size: 6 + ((i * 11) % 22), dur: 10 + ((i * 7) % 16), delay: -((i * 5) % 20) })), []);
-  const enter = async (user: string) => {
+  const enter = async (user: string, to = "/app") => {
     setBusy(user); setErr("");
-    try { await login(user, meta?.demo_password || "jal123"); nav("/app"); } catch (e: any) { setErr(e.message); setBusy(null); }
+    try { await login(user, meta?.demo_password || "jal123"); nav(to); } catch (e: any) { setErr(e.message); setBusy(null); }
   };
   const households = (meta?.villages || []).reduce((a: number, v: any) => a + v.households, 0);
   const d = "M0 70 Q 150 20 300 70 T 600 70 T 900 70 T 1200 70 T 1500 70 T 1800 70 T 2100 70 T 2400 70 V 160 H 0 Z";
@@ -55,7 +56,9 @@ export function Landing() {
         </p>
         <div className="row wrap" style={{ marginTop: 26, gap: 12 }}>
           <button className="btn" style={{ padding: "13px 22px", fontSize: 15 }} disabled={!!busy || !health} onClick={() => enter("demo.admin")}>Open the command centre<ArrowRight /></button>
+          <button className="btn ghost" style={{ padding: "13px 22px", fontSize: 15, background: "rgba(255,255,255,.12)", color: "#fff", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.35)" }} disabled={!!busy || !health} onClick={() => enter("demo.admin", "/app?tour=1")}><PlayCircle />Take the 2-minute tour</button>
           <a className="btn ghost" style={{ padding: "13px 22px", fontSize: 15, background: "rgba(255,255,255,.12)", color: "#fff", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.35)" }} href="/citizen"><Smartphone />Citizen app</a>
+          <a className="btn ghost" style={{ padding: "13px 22px", fontSize: 15, background: "rgba(255,255,255,.12)", color: "#fff", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.35)" }} href="/board/VLG-PW" target="_blank" rel="noreferrer"><Tv />Village board</a>
         </div>
         {err && <p style={{ marginTop: 14, color: "#fecaca", fontWeight: 600 }}>{err}</p>}
 
@@ -78,7 +81,7 @@ export function Landing() {
             <span>Mobile app in six languages: today's water, report with photo and voice, track, confirm the fix.</span>
           </a>
           {ROLES.map((r) => (
-            <button key={r.user} className="glass role" disabled={!!busy || !health} onClick={() => enter(r.user)}>
+            <button key={r.user} className="glass role" disabled={!!busy || !health} onClick={() => enter(r.user, (r as any).to)}>
               <span className="ico"><r.icon /></span><b>{r.title}</b><span>{busy === r.user ? "Signing in…" : r.sub}</span>
             </button>
           ))}

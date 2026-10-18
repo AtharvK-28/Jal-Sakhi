@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from . import config as C
 from . import seed as S
 from .core import analytics, planner
-from .core import interop
+from .core import interop, invest, sampling
 from .core.alerts import ROLE_TITLE as ALERT_ROLE_TITLE
 from .core.complaints import ComplaintError, LABEL as COMPLAINT_LABEL
 from .core.incidents import IncidentError, TYPES as INCIDENT_TYPES
@@ -823,6 +823,16 @@ def analytics_api(level: str = "state", id: str = "ST-MH", user=Depends(staff)):
     return _plain(analytics.analytics(P, vids))
 
 
+@app.get("/api/invest")
+def invest_plan(level: str = "state", id: str = "ST-MH", budget: float = Query(10_00_000, ge=10_000, le=10_00_00_000), user=Depends(staff)):
+    """Where a budget buys the most functional household taps across a jurisdiction (indicative unit costs)."""
+    vids = [v["id"] for v in analytics.villages_under(level, id)]
+    if not vids or not set(vids) <= scope_of(user):
+        raise HTTPException(403, "this unit is outside your jurisdiction")
+    with P.lock:
+        return _plain(invest.plan(P, vids, budget))
+
+
 @app.get("/api/ai/insights")
 def ai_insights(village: str, user=Depends(staff)):
     need_village(user, village)
@@ -934,19 +944,8 @@ def alert_recipient_test(rid: int, user=Depends(staff)):
 
 # ------------------------------------------------------------- water quality
 def _judge_test(params: dict) -> tuple[str, list[str]]:
-    L = C.QUALITY_LIMITS
-    fails = []
-    if params.get("turbidity_ntu") is not None and params["turbidity_ntu"] > L["turbidity_ntu"]["permissible"]:
-        fails.append("turbidity above 5 NTU")
-    if params.get("chlorine_mgl") is not None and params["chlorine_mgl"] < L["chlorine_mgl"]["min"]:
-        fails.append("residual chlorine below 0.2 mg/L")
-    if params.get("ph") is not None and not L["ph"]["min"] <= params["ph"] <= L["ph"]["max"]:
-        fails.append("pH outside 6.5 to 8.5")
-    if params.get("tds_mgl") is not None and params["tds_mgl"] > L["tds_mgl"]["permissible"]:
-        fails.append("TDS above 2000 mg/L")
-    if params.get("h2s_positive"):
-        fails.append("H2S vial positive (possible bacteriological contamination)")
-    return ("fail" if fails else "pass"), fails
+    result, fails, _rows = sampling.judge(params)
+    return result, fails
 
 
 class WqTest(BaseModel):
@@ -958,12 +957,60 @@ class WqTest(BaseModel):
     note: str | None = None
 
 
+def _test_outcome(row: dict, fails: list[str], user: dict, kind: str):
+    """What a result sets in motion: evidence on its incident, and for a failed field test a laboratory referral,
+    an incident for that lane if none is open, and a boil-water advisory to the households it serves."""
+    vid, result = row["village_id"], row["result"]
+    inc = P.incidents.items.get(row["incident_id"] or "")
+    if result == "fail" and kind == "FTK" and inc is None:
+        sim = P.sims[vid]
+        bid = sampling.point_branch(sim, row["sample_point"])
+        b = sim.branch_ids.index(bid) if bid else None
+        affected = [h for h, m in P.households.items() if m["village_id"] == vid and (b is None or m["branch_idx"] == b)]
+        where = sim.branch_names[b] if b is not None else f"the {sim.name} scheme"
+        inc, _new = P.incidents.raise_(
+            f"{vid}:ftk:{bid or 'scheme'}", vid, "QUALITY_VERIFY", "high", scope_type="branch" if bid else "scheme",
+            scope_id=bid or vid, branch_id=bid, affected_ids=affected, confidence=0.9, origin="ftk",
+            title=f"Field test failed at {row['sample_point']}",
+            summary=f"The Jal Sakhi field test at {row['sample_point']} failed: {'; '.join(fails)}. A field kit screens; "
+                    "the laboratory confirms. Households on the affected supply are advised to boil drinking water meanwhile.",
+            cause="Not yet known: contamination at the source, in the tank, or ingress through the pipes serving " + where + ".",
+            action="Laboratory confirmation of the sample; check chlorination; flush the line; re-test after the fix.",
+            evidence={"tests": [], "ftk_pass": False, "reference": "IS 10500:2012", "failed_checks": fails})
+        if inc is not None:
+            row["incident_id"] = inc["id"]
+            P.db.update("wq_tests", "id", row["id"], {"incident_id": inc["id"]})
+    if inc is None:
+        return
+    if result != "pending":
+        if kind == "LAB":
+            inc["evidence"]["lab_pass"] = result == "pass"
+        else:
+            inc["evidence"]["ftk_pass"] = result == "pass"
+            inc["evidence"]["ftk_at"] = row["ts"]
+    if row["id"] not in inc["evidence"].setdefault("tests", []):
+        inc["evidence"]["tests"].append(row["id"])
+    msg = (f"{kind} test {row['id']} at {row['sample_point']}: PASS" if result == "pass"
+           else f"{kind} test {row['id']} at {row['sample_point']}: H2S vial set, other parameters recorded" if result == "pending"
+           else f"{kind} test {row['id']} at {row['sample_point']}: FAIL ({'; '.join(fails)}). Laboratory confirmation requested.")
+    P.incidents.add_event(inc, "wq_test", msg, actor=user["name"], role=user["role"], data={"test_id": row["id"], "result": result})
+    P.incidents._persist(inc)
+    if result == "fail":
+        P.notify(row["village_id"], "advisory_quality", {"incident": inc["id"]}, incident_id=inc["id"], channel="app+sms",
+                 branch_id=inc["branch_id"] if inc["scope_type"] == "branch" else None)
+
+
+def _sync_test(row: dict, op: str):
+    P.sync.enqueue("water_quality_test", row["id"], row["village_id"], op,
+                   {**{k: row[k] for k in ("id", "sample_point", "kind", "params", "result", "ts", "lab_status")}, "target": "WQMIS (sandbox)"})
+
+
 @app.post("/api/quality/tests", status_code=201)
 def add_wq_test(body: WqTest, user=Depends(staff)):
     need_village(user, body.village_id)
     if body.kind not in ("FTK", "LAB"):
         raise HTTPException(422, "kind must be FTK or LAB")
-    result, fails = _judge_test(body.params)
+    result, fails, checks = sampling.judge(body.params)
     with P.lock:
         n = (P.db.scalar("SELECT COUNT(*) FROM wq_tests") or 0) + 1
         row = {"id": f"WQ-{n:04d}", "village_id": body.village_id, "sample_point": body.sample_point, "kind": body.kind,
@@ -971,25 +1018,65 @@ def add_wq_test(body: WqTest, user=Depends(staff)):
                "incident_id": body.incident_id, "lab_status": "requested" if (result == "fail" and body.kind == "FTK") else None,
                "note": body.note}
         P.db.insert("wq_tests", row)
-        inc = P.incidents.items.get(body.incident_id or "")
-        if inc is not None:
-            if body.kind == "LAB":
-                inc["evidence"]["lab_pass"] = result == "pass"
-            else:
-                inc["evidence"]["ftk_pass"] = result == "pass"
-                inc["evidence"]["ftk_at"] = row["ts"]
-            inc["evidence"].setdefault("tests", []).append(row["id"])
-            msg = (f"{body.kind} test {row['id']} at {body.sample_point}: PASS" if result == "pass"
-                   else f"{body.kind} test {row['id']} at {body.sample_point}: FAIL ({'; '.join(fails)}). Laboratory confirmation requested.")
-            P.incidents.add_event(inc, "wq_test", msg, actor=user["name"], role=user["role"], data={"test_id": row["id"], "result": result})
-            P.incidents._persist(inc)
-            if result == "fail":
-                P.notify(body.village_id, "advisory_quality", {"incident": inc["id"]}, incident_id=inc["id"], channel="app+sms")
+        _test_outcome(row, fails, user, body.kind)
         P.audit.log(P.now, user["name"], user["role"], "quality.test", "wq_test", row["id"], None, result, body.sample_point)
-        P.sync.enqueue("water_quality_test", row["id"], body.village_id, "create",
-                       {**{k: row[k] for k in ("id", "sample_point", "kind", "params", "result", "ts", "lab_status")}, "target": "WQMIS (sandbox)"})
+        _sync_test(row, "create")
         P.version += 1
-        return {**row, "failed_checks": fails}
+        return {**row, "failed_checks": fails, "checks": checks}
+
+
+class H2sBody(BaseModel):
+    positive: bool
+
+
+@app.patch("/api/quality/tests/{test_id}/h2s")
+def wq_test_h2s(test_id: str, body: H2sBody, user=Depends(staff)):
+    """The H2S vial a tester set up a day or two ago has been read: complete the test with it."""
+    with P.lock:
+        row = P.db.one("SELECT * FROM wq_tests WHERE id=?", (test_id.upper(),))
+        if row is None:
+            raise HTTPException(404, "test not found")
+        need_village(user, row["village_id"])
+        if row["result"] != "pending":
+            raise HTTPException(409, "this test is not waiting for an H2S result")
+        params = {**row["params"], "h2s_positive": body.positive}
+        result, fails, checks = sampling.judge(params)
+        row.update(params=params, result=result, lab_status="requested" if result == "fail" and row["kind"] == "FTK" else row["lab_status"])
+        P.db.update("wq_tests", "id", row["id"], {"params": params, "result": result, "lab_status": row["lab_status"]})
+        _test_outcome(row, fails, user, row["kind"])
+        P.audit.log(P.now, user["name"], user["role"], "quality.h2s", "wq_test", row["id"], "pending", result, "positive" if body.positive else "negative")
+        _sync_test(row, "update")
+        P.version += 1
+        return {**row, "failed_checks": fails, "checks": checks}
+
+
+@app.post("/api/quality/tests/{test_id}/photo", status_code=201)
+async def wq_test_photo(test_id: str, photo: UploadFile = File(...), user=Depends(staff)):
+    """A photo of the kit beside the colour chart, kept with the result as evidence."""
+    if not (photo.content_type or "").startswith("image/"):
+        raise HTTPException(415, "photo must be an image")
+    data = await photo.read()
+    if len(data) > C.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "photo is larger than 5 MB")
+    with P.lock:
+        row = P.db.one("SELECT village_id FROM wq_tests WHERE id=?", (test_id.upper(),))
+        if row is None:
+            raise HTTPException(404, "test not found")
+        need_village(user, row["village_id"])
+        name = f"{uuid.uuid4().hex}{ {'image/png': '.png', 'image/webp': '.webp'}.get(photo.content_type, '.jpg') }"
+        C.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        (C.UPLOAD_DIR / name).write_bytes(data)
+        P.db.update("wq_tests", "id", test_id.upper(), {"photo": f"/uploads/{name}"})
+        P.version += 1
+    return {"photo": f"/uploads/{name}"}
+
+
+@app.get("/api/quality/plan")
+def quality_plan(village: str, user=Depends(staff)):
+    """Where the village's testers should draw water first today, and why (contamination risk)."""
+    need_village(user, village)
+    with P.lock:
+        return _plain(sampling.plan(P, village))
 
 
 class LabResult(BaseModel):
@@ -1073,23 +1160,16 @@ def quality(village: str, user=Depends(staff)):
                        "tests": P.db.query("SELECT * FROM wq_tests WHERE village_id=? ORDER BY ts DESC LIMIT 30", (village,)),
                        "open": [P.incidents.public(i) for i in P.incidents.items.values()
                                 if i["village_id"] == village and (i["category"] == "quality" or "quality" in (i["cond_key"] or ""))],
-                       "sample_points": ["Tank outlet", f"{mon.branch_names[mon.wq2_branch]} tail-end tap"] + [f"{n} tap" for n in mon.branch_names],
+                       "sample_points": [sp["name"] for sp in sampling.sample_points(P.sims[village])], "ftk_params": sampling.FTK_PARAMS,
                        "caveat": "Online sensors measure turbidity, residual chlorine, pH and TDS only. They cannot detect bacteria, "
                                  "arsenic, fluoride, nitrate or iron. A sensor alert means 'test now', never 'water is unsafe' or 'water is safe'."})
 
 
 @app.get("/api/quality/ftk-sample")
-def ftk_sample(village: str, user=Depends(staff)):
-    """DEMO only: plausible FTK readings drawn from the simulated water, so a tester can 'take a sample'."""
+def ftk_sample(village: str, point: str = "Tank outlet", user=Depends(staff)):
+    """DEMO only: what the field test kit would show for water drawn at `point` now, read off the simulated scheme."""
     need_village(user, village)
-    sim = P.sims[village]
-    rnd = P.cit_rng
-    dirty = not P._cit[village].get("cluster_fixed", True)
-    turb = sim.turb + (3.5 if dirty else 0) + rnd.uniform(-0.2, 0.3)
-    cl = sim.cl * (0.5 if dirty else 1.0) + rnd.uniform(-0.03, 0.03)
-    return {"demo": True, "params": {"turbidity_ntu": round(max(0.1, turb), 1), "chlorine_mgl": round(max(0.0, cl), 2),
-                                     "ph": round(7.25 + rnd.uniform(-0.15, 0.15), 1), "tds_mgl": round(345 + rnd.uniform(-15, 15)),
-                                     "h2s_positive": bool(turb > 5 or cl < 0.1)}}
+    return {"demo": True, "point": point, "params": sampling.demo_reading(P, village, point, P.cit_rng)}
 
 
 # ------------------------------------------------------- integration / sync

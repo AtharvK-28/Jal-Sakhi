@@ -179,6 +179,52 @@ stays open for 30 days, during which every household can agree or disagree from 
 Exports for other systems: the scheme as GeoJSON (GIS map page) and the daily service record as CSV
 (Analytics page).
 
+## Guided tour and village board
+
+- **Guided tour** (landing page: *Take the 2-minute tour*, or the Demo drawer, or `?tour=1` on any staff page):
+  the tour follows one simulated leak through eight live steps. It resets the demo, injects the leak and
+  waits for detection, then opens the incident. It shows the phone alerts and the family on that lane
+  reading the alert in Marathi, in a phone frame. Then it acknowledges, records the repair, waits for
+  pressure to recover, records a passing field test, closes the incident on that evidence, and ends on the
+  IMIS / Sujal Gaon sync. Every step acts on the running server.
+- **Village display board** (`/board/VLG-PW`, no sign-in; `?lang=hi` to choose the language): a full-screen
+  page for a TV at the Panchayat office, school or health centre, as the DDWS monitoring roadmap (2021)
+  asks for. It shows supply on or off and until when, homes getting water now, tank level, timings, water
+  quality and the latest test, functional taps over 7 days, open issues, and a QR code to report or get
+  alerts. It is written in the village's language with English underneath, and refreshes every 10 seconds.
+- **Presentation mode** (Shift+P or `?present=1`): a small demo badge replaces the ribbon, and small text
+  grows, for screenshots and projectors.
+
+## Jal Sakhi water testing
+
+JJM trains five women in every village to test water with a field test kit (FTK). The **Jal Sakhi app**
+(`/tester`, demo sign-in *jalsakhi.pimpalwadi*) is their phone, in the village's language:
+
+- **Where to test first.** `core/sampling.py` ranks the tank outlet and each lane's last tap by
+  contamination risk, from what the platform already sees: an open quality alert, a leak or repair on the
+  lane, a pressure loss or supply cut, low chlorine (measured, or estimated along the lane), dirty-water
+  reports, a school / anganwadi / health centre on the lane, and the days since the last test. The weights
+  are stated, not learned, and every point is shown with its reason.
+- **The kit's nine parameters** (pH, alkalinity, chloride, nitrate, total hardness, fluoride, iron, free
+  residual chlorine, H2S) are entered by tapping the colour the kit shows, and judged against IS 10500:2012.
+  An H2S vial can be read later (24 to 48 hours); the test completes then.
+- **A failed test sets everything in motion:** a laboratory referral, a QUALITY_VERIFY incident for that lane
+  (if none is open), a boil-water advisory to its households in the app and on their phones, the operator's
+  alert, and the WQMIS sync. That incident closes on a passing re-test or a laboratory result.
+
+## Pani Samiti phone and investment planner
+
+- **Pani Samiti phone** (`/samiti`, demo sign-in *vwsc.pimpalwadi*): the VWSC the problem statement names
+  as a user, in the village's language. It shows today's water and the functional taps, what needs a decision
+  (with Acknowledge and Send the repair crew, and overdue deadlines in red), upkeep that is due, water-charge
+  collection and arrears, the Gram Sabha report card, and a link to the village board.
+- **Investment planner** (`/app/planner`, state, district or block scope): every household failing the
+  JJM test is split by cause, matched to the work that would bring it back, and ranked by homes per lakh.
+  The causes are household connection, lane leaks, tail-end pressure, chlorination, pump, source and silent
+  sensors. A budget slider fills the list in that order and shows functional taps before and after.
+  Pump and source works are counted as homes *protected*, apart from homes *restored*. Unit costs are
+  indicative and stated in `core/invest.py`, to be replaced by the state's Schedule of Rates.
+
 ## Phone alerts
 
 Every incident also goes to a phone (**Phone alerts** page; `backend/app/core/alerts.py`). Routing follows
@@ -281,6 +327,9 @@ The simulator is stepped manually, so results are repeatable.
 - **Statistics.** 76% (FA 2024), the 55% and 58% figures for Pani Samitis and O&M staff, and the Sujal
   Gaon ID facts came from secondary summaries of the official documents. Confirm the exact table and
   page in the DDWS national report before citing.
+- **Field test kit limits and colours.** The nine FTK limits are taken from IS 10500:2012 as published. Iron is set to
+  0.3 mg/L with no relaxation; check it against the standard's later amendments before citing. The chart colours in
+  the Jal Sakhi app are approximations of a typical kit's chart, not the kit's own.
 - **Bill of materials.** Prices are indicative single-unit hobby prices, not quotations.
 - **Upkeep and accounts.** Tariffs, payments, expenses and past operator entries are invented. The
   electricity rate (₹7 a unit), the operator's honorarium and the chlorine dose are demo assumptions.

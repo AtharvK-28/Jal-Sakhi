@@ -18,6 +18,10 @@ import { Alerts } from "./pages/Alerts";
 import { Devices } from "./pages/Devices";
 import { About } from "./pages/About";
 import { CitizenApp } from "./citizen/CitizenApp";
+import { Board } from "./pages/Board";
+import { TesterApp } from "./citizen/TesterApp";
+import { SamitiApp } from "./citizen/SamitiApp";
+import { Planner } from "./pages/Planner";
 import { Loader } from "./components/ui";
 
 // the 3D map engine is large; load it only when the GIS page is opened
@@ -35,6 +39,9 @@ export function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/citizen" element={<CitizenApp />} />
+        <Route path="/board/:village" element={<Board />} />
+        <Route path="/tester" element={<TesterApp />} />
+        <Route path="/samiti" element={<SamitiApp />} />
         <Route path="/app" element={<Staff />}>
           <Route index element={<Overview />} />
           <Route path="twin" element={<TwinPage />} />
@@ -48,6 +55,7 @@ export function App() {
           <Route path="upkeep" element={<Upkeep />} />
           <Route path="ai" element={<AIInsights />} />
           <Route path="analytics" element={<Analytics />} />
+          <Route path="planner" element={<Planner />} />
           <Route path="integration" element={<Integration />} />
           <Route path="devices" element={<Devices />} />
           <Route path="about" element={<About />} />

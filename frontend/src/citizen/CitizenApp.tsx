@@ -145,6 +145,9 @@ function HomeTab({ home, t, lang, goReport, onReset, reload, queued, stale }: an
   const s = home.supply;
   const st = s.state;
   const [pulse, setPulse] = useState<boolean | null>(home.pulse_today);
+  const alertsRef = useRef<HTMLDivElement>(null);
+  // ?focus=alerts opens on the messages (the guided tour's phone frame uses it)
+  useEffect(() => { if (new URLSearchParams(window.location.search).get("focus") === "alerts") setTimeout(() => alertsRef.current?.scrollIntoView({ block: "center" }), 300); }, []);
   const title = t(`${st}_t`), sub = t(`${st}_s`, { t: home.clock.next_window });
   const pct = Math.min(1, s.lpcd_today / home.lpcd_norm);
   const qv = home.quality.status === "verify" || s.quality_flag;
@@ -194,7 +197,7 @@ function HomeTab({ home, t, lang, goReport, onReset, reload, queued, stale }: an
 
         <button className="btn big-btn" onClick={goReport}><MessageSquare />{t("report_btn")}</button>
 
-        <div className="c-card">
+        <div className="c-card" ref={alertsRef}>
           <div className="row" style={{ marginBottom: 8 }}><BellRing size={17} color="var(--brand)" /><b>{t("alerts")}</b></div>
           {home.alerts.length === 0 ? <p className="muted sm">{t("no_alerts")}</p> : home.alerts.slice(0, 6).map((a: any) => (
             <div key={a.id} className="row sm" style={{ padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "flex-start" }}>

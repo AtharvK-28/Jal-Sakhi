@@ -1,7 +1,8 @@
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Bell, CheckCircle2, ChevronRight, FlaskConical, Info, MessageSquareText, SlidersHorizontal, TrendingUp, Users } from "lucide-react";
+import { AlertTriangle, Bell, CheckCircle2, ChevronRight, FlaskConical, Info, MessageSquareText, Siren, SlidersHorizontal, TrendingUp, Users } from "lucide-react";
 import { Empty, OriginPill, SevPill, StatusPill } from "./ui";
 import { hhmm } from "../lib/format";
+import { useLive } from "../lib/live";
 
 /** Compact, priority-ordered incident list used on overview pages. */
 export function IncidentQueue({ items, limit = 6, showVillage, names }: { items: any[]; limit?: number; showVillage?: boolean; names?: Record<string, string> }) {
@@ -18,9 +19,9 @@ export function IncidentQueue({ items, limit = 6, showVillage, names }: { items:
             <b style={{ lineHeight: 1.35 }}>{i.title}</b>
             <span className="row wrap" style={{ gap: 6, marginTop: 5 }}>
               <SevPill sev={i.severity} /><StatusPill status={i.status} /><OriginPill origin={i.origin} />
-              {i.affected_count > 0 && <span className="pill"><Users />{i.affected_count} homes</span>}
-              {i.report_count > 0 && <span className="pill high"><MessageSquareText />{i.report_count}</span>}
-              {showVillage && <span className="pill info">{names?.[i.village_id] || i.village_id}</span>}
+              {i.affected_count > 0 && <span className="pill quiet"><Users />{i.affected_count} homes</span>}
+              {i.report_count > 0 && <span className="pill quiet"><MessageSquareText />{i.report_count} reports</span>}
+              {showVillage && <span className="pill quiet" style={{ color: "var(--ink)" }}>{names?.[i.village_id] || i.village_id}</span>}
               <span className="muted xs">{i.id} · since {hhmm(i.first_seen)}</span>
             </span>
           </span>
@@ -29,6 +30,30 @@ export function IncidentQueue({ items, limit = 6, showVillage, names }: { items:
       ))}
       {items.length > limit && <button className="btn soft sm" onClick={() => nav("/app/incidents")}>View all {items.length} incidents</button>}
     </div>
+  );
+}
+
+/** The single incident to act on first, or a plain all-clear. Sits under the command-centre hero. */
+export function AttentionStrip({ items, names }: { items: any[]; names?: Record<string, string> }) {
+  const nav = useNavigate();
+  const { clock } = useLive();
+  const top = [...items].sort((a, b) => b.priority - a.priority)[0];
+  if (!top) return (
+    <div className="attn ok"><span className="attn-k"><CheckCircle2 />All clear</span>
+      <span className="attn-t"><b>Nothing needs attention right now</b><span className="sm ink2">Every scheme in view is supplying as scheduled.</span></span></div>
+  );
+  const open = top.status === "open";
+  const due = open ? top.sla_ack_due : top.sla_resolve_due;
+  const where = names?.[top.village_id];
+  const late = !!(clock?.iso && due && clock.iso.slice(0, 19) > due.slice(0, 19));  // both are simulation time
+  return (
+    <button className={`attn sev-${top.severity}`} onClick={() => nav(`/app/incidents/${top.id}`)}>
+      <span className="attn-k"><Siren />Needs attention now</span>
+      <span className="attn-t"><b>{top.title}</b>
+        <span className="sm ink2">{where ? `${where} · ` : ""}{top.affected_count} home{top.affected_count === 1 ? "" : "s"} affected · {top.label} · {late ? <b style={{ color: "var(--crit)" }}>{open ? "acknowledgement" : "resolution"} overdue since {hhmm(due)}</b> : <>{open ? "acknowledge" : "resolve"} by {hhmm(due)}</>}{items.length > 1 ? ` · ${items.length - 1} more in the queue` : ""}</span></span>
+      <SevPill sev={top.severity} />
+      <span className="btn sm">Open<ChevronRight /></span>
+    </button>
   );
 }
 

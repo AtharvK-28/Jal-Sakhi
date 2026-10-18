@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 // Small hand-rolled SVG charts. Rules followed: one y-axis, thin marks (2 px lines, ~10% area wash),
 // solid hairline grid, legend for 2+ series, text in ink tokens (never the series colour), hover tooltip.
 
-export type Series = { name: string; color: string; pts: [number, number | null][]; dashed?: boolean };
+export type Series = { name: string; color: string; pts: [number, number | null][]; dashed?: boolean; minor?: boolean }; // minor: thinner, lighter context line
 
 function useWidth() {
   const ref = useRef<HTMLDivElement>(null);
@@ -47,7 +47,11 @@ export function LineChart({ series, height = 190, yMin, yMax, xFmt = (x) => Stri
 
   if (!calc) return <div className="chart" ref={ref}><div className="empty" style={{ height, padding: 0, display: "grid", placeItems: "center" }}>{empty}</div></div>;
   const { x0, x1, lo, hi, sx, sy } = calc;
-  const ticks = [0, 1, 2, 3, 4].map((i) => lo + ((hi - lo) * i) / 4);
+  // round tick values (0, 25, 50 ...), never 22.5 or 67.5
+  const raw = (hi - lo) / 4, mag = Math.pow(10, Math.floor(Math.log10(raw || 1))), f = raw / mag;
+  const step = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * mag;
+  const ticks: number[] = [];
+  for (let t = Math.ceil(lo / step - 1e-9) * step; t <= hi + 1e-9; t += step) ticks.push(t);
   // x positions across all series (series may cover different ranges, e.g. measured + forecast)
   const base: [number, number | null][] = Array.from(new Set(live.flatMap((s) => s.pts.map((p) => p[0])))).sort((p, q) => p - q).map((x) => [x, null]);
   const xt = base.length <= 6 ? base.map((p) => p[0]) : [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(x0 + f * (x1 - x0)));
@@ -94,7 +98,7 @@ export function LineChart({ series, height = 190, yMin, yMax, xFmt = (x) => Stri
           const pts = live[0].pts.filter((p) => p[1] !== null) as [number, number][];
           return <path d={`${path(pts)}L${sx(pts[pts.length - 1][0]).toFixed(1)} ${sy(lo)} L${sx(pts[0][0]).toFixed(1)} ${sy(lo)} Z`} fill={live[0].color} opacity="0.12" />;
         })()}
-        {live.map((s) => <path key={s.name} d={path(s.pts)} fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" strokeDasharray={s.dashed ? "6 5" : undefined} />)}
+        {live.map((s) => <path key={s.name} d={path(s.pts)} fill="none" stroke={s.color} strokeWidth={s.minor ? 1.4 : 2.4} opacity={s.minor ? 0.5 : 1} strokeLinejoin="round" strokeLinecap="round" strokeDasharray={s.dashed ? "6 5" : undefined} />)}
         {live.map((s) => {
           const last = [...s.pts].reverse().find((p) => p[1] !== null);
           return last ? <circle key={s.name} cx={sx(last[0])} cy={sy(last[1] as number)} r="4" fill={s.color} stroke="var(--surface)" strokeWidth="2" /> : null;
