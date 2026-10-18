@@ -58,6 +58,7 @@ INSTITUTIONS = [  # institutional tap connections (JJM also covers schools / ang
 
 USERS = [
     {"username": "naljal.mitra", "name": "Nal Jal Mitra (Operator)", "role": "operator", "scope_level": "village", "scope_id": "VLG-PW"},
+    {"username": "jalsakhi.pimpalwadi", "name": "Jal Sakhi FTK team, Pimpalwadi", "role": "tester", "scope_level": "village", "scope_id": "VLG-PW"},
     {"username": "vwsc.pimpalwadi", "name": "VWSC / Pani Samiti, Pimpalwadi", "role": "vwsc", "scope_level": "village", "scope_id": "VLG-PW"},
     {"username": "je.mulshi", "name": "Junior Engineer, Mulshi Block", "role": "block", "scope_level": "block", "scope_id": "BK-MUL"},
     {"username": "ee.pune", "name": "Executive Engineer, Pune District", "role": "district", "scope_level": "district", "scope_id": "DT-PUN"},

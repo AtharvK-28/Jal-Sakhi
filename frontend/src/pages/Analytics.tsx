@@ -52,21 +52,22 @@ export function Analytics() {
       <div className="grid kpis" style={{ marginBottom: 16 }}>
         <Kpi icon={<BadgeCheck />} label="Functional taps, 7-day average" value={n1(avg(last7, "functional_pct"), 0)} unit="%" tone={delta < -2 ? "warn" : "good"} sub={`${delta >= 0 ? "+" : ""}${n1(delta)} points vs the week before`} />
         <Kpi icon={<TrendingUp />} label="Average supply, 7 days" value={n1(avg(last7, "avg_lpcd"), 0)} unit="lpcd" sub="JJM service level is 55" />
-        <Kpi icon={<Clock />} label="Acknowledged within SLA" value={a.sla.ack_within_pct != null ? n0(a.sla.ack_within_pct) : "–"} unit="%" tone={a.sla.ack_within_pct != null && a.sla.ack_within_pct < 70 ? "warn" : undefined} sub={`${a.sla.ack_n} incident${a.sla.ack_n === 1 ? "" : "s"} this session`} />
+        <Kpi icon={<Clock />} label="Acknowledged within SLA" value={a.sla.ack_within_pct != null ? n0(a.sla.ack_within_pct) : "–"} unit="%" tone={a.sla.ack_within_pct != null && a.sla.ack_within_pct < 70 ? "warn" : undefined} sub={a.sla.ack_n ? `of ${a.sla.ack_n} due so far; a missed one escalates to the block` : "none due yet this session"} />
         <Kpi icon={<Timer />} label="Median detection time" value={a.median_detection_delay_min != null ? n1(a.median_detection_delay_min, 0) : "–"} unit="min" sub="fault injected to incident raised (demo)" />
         <Kpi icon={<Radar />} label="Virtual sensing accuracy" value={a.estimator.agreement_pct != null ? n1(a.estimator.agreement_pct) : "–"} unit="%" tone="good" sub="inferred vs simulated truth" />
-        <Kpi icon={<MessageSquareText />} label="Citizen pulse agrees" value={a.pulse.agreement_pct != null ? n0(a.pulse.agreement_pct) : "–"} unit="%" sub={`${a.pulse.responses} daily "did water come?" answers`} />
+        <Kpi icon={<MessageSquareText />} label="Citizen pulse agrees" value={a.pulse.agreement_pct != null ? n0(a.pulse.agreement_pct) : "Pending"} unit={a.pulse.agreement_pct != null ? "%" : undefined}
+          sub={a.pulse.responses ? `${a.pulse.responses} daily "did water come?" answers` : "households answer when a supply window closes"} />
       </div>
 
       <div className="grid g2">
         <div className="card"><div className="card-h"><h3><TrendingUp />JJM functionality and its three tests</h3></div>
           <div className="card-b"><LineChart height={230} yMin={40} yMax={100} unit="%" yFmt={(y) => `${Math.round(y)}`} xFmt={xf} area={false}
-            series={[{ name: "Functional (all three)", color: "var(--s1)", pts: t.map((r: any, i: number) => [i, r.functional_pct]) }, { name: "Regularity", color: "var(--s2)", pts: t.map((r: any, i: number) => [i, r.regularity_pct]) },
-              { name: "Quantity (55 lpcd)", color: "var(--s3)", pts: t.map((r: any, i: number) => [i, r.quantity_pct]) }, { name: "Quality", color: "var(--s4)", pts: t.map((r: any, i: number) => [i, r.quality_pct]) }]}
+            series={[{ name: "Functional (all three)", color: "var(--s1)", pts: t.map((r: any, i: number) => [i, r.functional_pct]) }, { name: "Regularity", color: "var(--s2)", minor: true, pts: t.map((r: any, i: number) => [i, r.regularity_pct]) },
+              { name: "Quantity (55 lpcd)", color: "var(--s3)", minor: true, pts: t.map((r: any, i: number) => [i, r.quantity_pct]) }, { name: "Quality", color: "var(--s4)", minor: true, pts: t.map((r: any, i: number) => [i, r.quality_pct]) }]}
             refLines={[{ y: 76, label: "national FA 2024: 76%" }]} />
             <p className="xs muted" style={{ marginTop: 6 }}>A tap is functional only when it passes all three: regular supply, adequate quantity and prescribed quality, the definition used in the national Functionality Assessment.</p></div></div>
         <div className="card"><div className="card-h"><h3><BarChart3 />Water supplied per person per day</h3></div>
-          <div className="card-b"><LineChart height={230} yMin={0} yMax={90} unit=" lpcd" yFmt={(y) => `${Math.round(y)}`} xFmt={xf}
+          <div className="card-b"><LineChart height={230} yMin={0} yMax={100} unit=" lpcd" yFmt={(y) => `${Math.round(y)}`} xFmt={xf}
             series={[{ name: "Average lpcd", color: "var(--s1)", pts: t.map((r: any, i: number) => [i, r.avg_lpcd]) }]} refLines={[{ y: 55, label: "JJM norm 55 lpcd", color: "var(--good)" }]} />
             <p className="xs muted" style={{ marginTop: 6 }}>Latest day: {n1(last.avg_lpcd, 0)} lpcd · {n1(last.supply_hours)} supply hours{last.live ? " (live simulation day)" : ""}.</p></div></div>
       </div>

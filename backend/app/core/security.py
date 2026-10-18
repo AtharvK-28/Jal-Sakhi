@@ -16,10 +16,10 @@ from datetime import datetime
 
 from .. import config as C
 
-STAFF_ROLES = {"operator", "vwsc", "block", "district", "state", "admin"}
+STAFF_ROLES = {"operator", "vwsc", "tester", "block", "district", "state", "admin"}
 OVERRIDE_ROLES = {"vwsc", "block", "district", "state", "admin"}  # may close without recovery evidence
 ROLE_LABEL = {
-    "citizen": "Citizen", "operator": "Nal Jal Mitra (operator)", "vwsc": "VWSC / Gram Panchayat",
+    "citizen": "Citizen", "operator": "Nal Jal Mitra (operator)", "tester": "Jal Sakhi (water tester)", "vwsc": "VWSC / Gram Panchayat",
     "block": "Block engineer", "district": "District engineer", "state": "State JJM cell", "admin": "Demo admin",
 }
 
