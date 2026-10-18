@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: jalsakhi-backend
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: python run.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: CORS_ORIGINS
+        value: "*"
+    healthCheckPath: /api/health
+    autoDeploy: true
