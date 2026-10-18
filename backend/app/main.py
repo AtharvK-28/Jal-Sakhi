@@ -957,10 +957,15 @@ class WqTest(BaseModel):
     note: str | None = None
 
 
-def _test_outcome(row: dict, fails: list[str], user: dict, kind: str):
+def _test_outcome(row: dict, fails: list[str], user: dict, kind: str, checks: list[dict]) -> dict:
     """What a result sets in motion: evidence on its incident, and for a failed field test a laboratory referral,
-    an incident for that lane if none is open, and a boil-water advisory to the households it serves."""
+    an incident for that lane if none is open, and a boil-water advisory to the households it serves.
+    Returns what was done, so the person who entered the result can be told."""
     vid, result = row["village_id"], row["result"]
+    advisory = sampling.advisory_for(checks) if result == "fail" else None
+    did = {"lab_referral": row.get("lab_status") == "requested", "incident": row["incident_id"], "incident_opened": False,
+           "advisory": advisory, "advised": None, "advised_households": 0, "wqmis": "queued",
+           "failed": [c["label"] for c in checks if c["status"] == "fail"]}
     inc = P.incidents.items.get(row["incident_id"] or "")
     if result == "fail" and kind == "FTK" and inc is None:
         sim = P.sims[vid]
@@ -968,20 +973,25 @@ def _test_outcome(row: dict, fails: list[str], user: dict, kind: str):
         b = sim.branch_ids.index(bid) if bid else None
         affected = [h for h, m in P.households.items() if m["village_id"] == vid and (b is None or m["branch_idx"] == b)]
         where = sim.branch_names[b] if b is not None else f"the {sim.name} scheme"
+        severity = "high" if advisory else "low"  # iron, hardness, pH: maintenance for the operator, not a health alert
+        meanwhile = {"boil": "Households on the affected supply are advised to boil drinking water meanwhile.",
+                     "alternate_source": "Households on the affected supply are advised to drink from another safe source "
+                                         "meanwhile: boiling does not remove this."}.get(advisory, "Not an immediate health risk: no household advisory.")
         inc, _new = P.incidents.raise_(
-            f"{vid}:ftk:{bid or 'scheme'}", vid, "QUALITY_VERIFY", "high", scope_type="branch" if bid else "scheme",
+            f"{vid}:ftk:{bid or 'scheme'}", vid, "QUALITY_VERIFY", severity, scope_type="branch" if bid else "scheme",
             scope_id=bid or vid, branch_id=bid, affected_ids=affected, confidence=0.9, origin="ftk",
             title=f"Field test failed at {row['sample_point']}",
             summary=f"The Jal Sakhi field test at {row['sample_point']} failed: {'; '.join(fails)}. A field kit screens; "
-                    "the laboratory confirms. Households on the affected supply are advised to boil drinking water meanwhile.",
+                    f"the laboratory confirms. {meanwhile}",
             cause="Not yet known: contamination at the source, in the tank, or ingress through the pipes serving " + where + ".",
             action="Laboratory confirmation of the sample; check chlorination; flush the line; re-test after the fix.",
             evidence={"tests": [], "ftk_pass": False, "reference": "IS 10500:2012", "failed_checks": fails})
         if inc is not None:
             row["incident_id"] = inc["id"]
             P.db.update("wq_tests", "id", row["id"], {"incident_id": inc["id"]})
+            did.update(incident=inc["id"], incident_opened=True, scope=where)
     if inc is None:
-        return
+        return did
     if result != "pending":
         if kind == "LAB":
             inc["evidence"]["lab_pass"] = result == "pass"
@@ -995,9 +1005,14 @@ def _test_outcome(row: dict, fails: list[str], user: dict, kind: str):
            else f"{kind} test {row['id']} at {row['sample_point']}: FAIL ({'; '.join(fails)}). Laboratory confirmation requested.")
     P.incidents.add_event(inc, "wq_test", msg, actor=user["name"], role=user["role"], data={"test_id": row["id"], "result": result})
     P.incidents._persist(inc)
-    if result == "fail":
-        P.notify(row["village_id"], "advisory_quality", {"incident": inc["id"]}, incident_id=inc["id"], channel="app+sms",
-                 branch_id=inc["branch_id"] if inc["scope_type"] == "branch" else None)
+    if advisory:
+        lane = inc["branch_id"] if inc["scope_type"] == "branch" else None
+        P.notify(row["village_id"], "advisory_quality" if advisory == "boil" else "advisory_chemical", {"incident": inc["id"]},
+                 incident_id=inc["id"], channel="app+sms", branch_id=lane)
+        sim = P.sims[vid]
+        did.update(advised=sim.branch_names[sim.branch_ids.index(lane)] if lane in sim.branch_ids else f"all of {sim.name}",
+                   advised_households=sum(1 for h in P.households.values() if h["village_id"] == vid and (lane is None or h["branch_id"] == lane)))
+    return did
 
 
 def _sync_test(row: dict, op: str):
@@ -1018,11 +1033,11 @@ def add_wq_test(body: WqTest, user=Depends(staff)):
                "incident_id": body.incident_id, "lab_status": "requested" if (result == "fail" and body.kind == "FTK") else None,
                "note": body.note}
         P.db.insert("wq_tests", row)
-        _test_outcome(row, fails, user, body.kind)
+        did = _test_outcome(row, fails, user, body.kind, checks)
         P.audit.log(P.now, user["name"], user["role"], "quality.test", "wq_test", row["id"], None, result, body.sample_point)
         _sync_test(row, "create")
         P.version += 1
-        return {**row, "failed_checks": fails, "checks": checks}
+        return {**row, "failed_checks": fails, "checks": checks, "follow_up": did, "advice": sampling.advice(checks)}
 
 
 class H2sBody(BaseModel):
@@ -1043,11 +1058,11 @@ def wq_test_h2s(test_id: str, body: H2sBody, user=Depends(staff)):
         result, fails, checks = sampling.judge(params)
         row.update(params=params, result=result, lab_status="requested" if result == "fail" and row["kind"] == "FTK" else row["lab_status"])
         P.db.update("wq_tests", "id", row["id"], {"params": params, "result": result, "lab_status": row["lab_status"]})
-        _test_outcome(row, fails, user, row["kind"])
+        did = _test_outcome(row, fails, user, row["kind"], checks)
         P.audit.log(P.now, user["name"], user["role"], "quality.h2s", "wq_test", row["id"], "pending", result, "positive" if body.positive else "negative")
         _sync_test(row, "update")
         P.version += 1
-        return {**row, "failed_checks": fails, "checks": checks}
+        return {**row, "failed_checks": fails, "checks": checks, "follow_up": did, "advice": sampling.advice(checks)}
 
 
 @app.post("/api/quality/tests/{test_id}/photo", status_code=201)

@@ -78,6 +78,22 @@ def judge(params: dict) -> tuple[str, list[str], list[dict]]:
     return ("fail" if fails else "pending" if pending else "pass"), fails, rows
 
 
+# What a failure means for the household. Germs: boil the water. Chemicals boiling cannot remove (it concentrates
+# them): drink from another safe source. Everything else (iron, hardness, pH ...) is not an immediate health risk:
+# it is the operator's job, with no household advisory.
+MICROBIAL = {"h2s_positive", "coliform", "chlorine_mgl"}
+CHEMICAL = {"fluoride_mgl", "nitrate_mgl", "arsenic_mgl"}
+
+
+def advisory_for(checks: list[dict]) -> str | None:
+    failed = {c["key"] for c in checks if c["status"] == "fail"}
+    if failed & MICROBIAL:
+        return "boil"
+    if failed & CHEMICAL:
+        return "alternate_source"
+    return None
+
+
 def sample_points(sim) -> list[dict]:
     """Where a tester can draw water: the tank outlet, and the last tap on each lane (the worst-served water)."""
     return [{"name": "Tank outlet", "scope": "scheme", "branch_id": None, "lane": None}] + [
@@ -190,3 +206,54 @@ def demo_reading(p, vid: str, point: str, rnd) -> dict:
             "nitrate_mgl": snap("nitrate_mgl", 12 + rnd.uniform(-5, 8)), "fluoride_mgl": snap("fluoride_mgl", 0.5 + rnd.uniform(-0.2, 0.3)),
             "iron_mgl": snap("iron_mgl", 0.1 + (0.4 if broken else 0) + rnd.uniform(-0.05, 0.05)), "chlorine_mgl": snap("chlorine_mgl", cl),
             "h2s_positive": bool(broken or dirty)}
+
+
+# What to do about a parameter that fails (or is above the acceptable level). Cautious by design: it says what
+# is likely and what to check; the laboratory result and the engineer decide.
+ADVICE = {
+    "chlorine_mgl": ("Residual chlorine too low: disinfection cannot be assumed", [
+        "Check the chlorinator is working and the dosing stock is not finished.",
+        "Restore dosing so a tail-end tap reads 0.2 to 0.5 mg/L, then re-test free residual chlorine about 30 minutes later.",
+        "Until it reads 0.2 mg/L or more, households should boil drinking water."]),
+    "h2s_positive": ("H2S vial turned black: possible faecal contamination", [
+        "Households on this supply should boil drinking water until a laboratory clears it.",
+        "Send a sample for a laboratory bacteriological test (E. coli / total coliform).",
+        "Look for where dirt gets in: leaks, low-pressure areas, a damaged tap or an open tank lid; shock-chlorinate the tank and flush the line.",
+        "Re-test with a new H2S vial after the fix."]),
+    "iron_mgl": ("Iron above the limit", [
+        "Often from rusting GI pipes or fittings, or from the source rock; it stains, tastes metallic and makes chlorine work less well.",
+        "Flush the line from the tail end, check old GI pipes on this lane, and re-test after flushing.",
+        "If it stays high, ask for a laboratory test of the source and plan aeration and filtration at the source."]),
+    "fluoride_mgl": ("Fluoride above 1.5 mg/L", [
+        "Long-term drinking causes dental and skeletal fluorosis; children are most at risk.",
+        "Confirm in the laboratory, then arrange a safe drinking source (another source, blending, or a community defluoridation unit).",
+        "Boiling does not remove fluoride."]),
+    "nitrate_mgl": ("Nitrate above 45 mg/L", [
+        "Usually sewage, soak pits or fertiliser reaching the source; dangerous for infants under six months.",
+        "Check the source's surroundings, confirm in the laboratory, and give infants water from another safe source.",
+        "Boiling does not remove nitrate."]),
+    "ph": ("pH outside 6.5 to 8.5", [
+        "Check the source and any dosing; very low pH corrodes pipes, very high pH weakens chlorination.",
+        "Confirm in the laboratory before changing treatment."]),
+    "hardness_mgl": ("Total hardness high", [
+        "Mostly a scaling and taste problem; above 600 mg/L consider blending with a softer source.",
+        "Note it on the source record and re-test monthly."]),
+    "alkalinity_mgl": ("Alkalinity high", ["Usually from the source rock; it affects taste and treatment. Confirm in the laboratory and re-test monthly."]),
+    "chloride_mgl": ("Chloride high", ["A salty taste; a sudden rise can mean sewage or saline intrusion. Check the source's surroundings and confirm in the laboratory."]),
+    "turbidity_ntu": ("Water is cloudy", ["Check the source, the tank and for pipe breaks, and flush the line. Cloudy water also shields germs from chlorine."]),
+    "tds_mgl": ("Dissolved solids high", ["From the source; confirm in the laboratory and consider blending with a better source."]),
+    "coliform": ("Bacteria found", ["The boil-water advisory stays until a laboratory re-test is clear; disinfect the tank and lines and find where dirt gets in."]),
+}
+
+
+def advice(checks: list[dict]) -> list[dict]:
+    """Guidance for every parameter that failed, then any above its acceptable level."""
+    out = []
+    for status in ("fail", "caution"):
+        for c in checks:
+            if c["status"] == status and c["key"] in ADVICE:
+                title, steps = ADVICE[c["key"]]
+                out.append({"key": c["key"], "status": status,
+                            "title": title if status == "fail" else f"{title} (above the acceptable level, within the permissible limit)",
+                            "steps": steps if status == "fail" else steps[-1:]})
+    return out

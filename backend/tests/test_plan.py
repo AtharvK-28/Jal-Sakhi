@@ -861,3 +861,19 @@ def test_investment_planner_buys_the_most_functional_taps_per_rupee(client, admi
     op = login(client, "naljal.mitra")
     assert client.get("/api/invest?level=state&id=ST-MH", headers=op).status_code == 403
     assert client.get(f"/api/invest?level=village&id={PW}", headers=op).status_code == 200
+
+
+def test_a_failed_test_says_why_what_was_done_and_what_to_do(client, admin):
+    params = {"ph": 6.5, "alkalinity_mgl": 100, "chloride_mgl": 100, "hardness_mgl": 300, "nitrate_mgl": 45, "fluoride_mgl": 0.5,
+              "iron_mgl": 0.5, "chlorine_mgl": 0.2, "h2s_positive": False}
+    r = client.post("/api/quality/tests", headers=admin, json={"village_id": PW, "sample_point": "Mandir Lane tail-end tap", "kind": "FTK", "params": params}).json()
+    assert r["result"] == "fail" and r["failed_checks"] == ["iron 0.5 mg/L above 0.3 mg/L"]
+    f = r["follow_up"]
+    assert f["lab_referral"] and f["incident_opened"] and f["advisory"] is None and f["advised"] is None  # iron: boiling would not help
+    assert not any(n["kind"].startswith("advisory") for n in client.get("/api/citizen/notifications?household_id=PW-HH-005").json())
+    fl = client.post("/api/quality/tests", headers=admin, json={"village_id": PW, "sample_point": "Talav Ali tail-end tap", "kind": "FTK",
+                                                                 "params": {**params, "iron_mgl": 0.1, "fluoride_mgl": 2.0}}).json()
+    assert fl["follow_up"]["advisory"] == "alternate_source" and fl["follow_up"]["advised"] == "Talav Ali"
+    assert client.get("/api/citizen/notifications?household_id=PW-HH-085").json()[0]["kind"] == "advisory_chemical"
+    keys = [(a["key"], a["status"]) for a in r["advice"]]
+    assert keys[0] == ("iron_mgl", "fail") and ("hardness_mgl", "caution") in keys  # failures first, then cautions

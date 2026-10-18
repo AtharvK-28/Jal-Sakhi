@@ -216,7 +216,7 @@ function Result({ r, t, onBack }: { r: any; t: any; onBack: () => void }) {
         <Waves fill="var(--bg-2)" />
       </header>
       <div className="c-body">
-        <div className={`note ${fail ? "warn" : ""}`}>{fail ? <AlertTriangle /> : <CheckCircle2 />}<span>{fail ? t("ts_failnext") : pend ? t("ts_pendnext") : t("ts_passnext")}</span></div>
+        <div className={`note ${fail ? "warn" : ""}`}>{fail ? <AlertTriangle /> : <CheckCircle2 />}<span>{fail ? t(r.follow_up?.advisory === "boil" ? "ts_failnext" : r.follow_up?.advisory === "alternate_source" ? "ts_fail_chem" : "ts_fail_none") : pend ? t("ts_pendnext") : t("ts_passnext")}</span></div>
         <div className="c-card">
           {(r.checks || []).map((c: any) => (
             <div key={c.key} className="row between sm" style={{ padding: "7px 0", borderTop: "1px solid var(--line)" }}>

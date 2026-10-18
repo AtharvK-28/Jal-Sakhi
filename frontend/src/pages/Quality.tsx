@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, FlaskConical, Microscope, ShieldQuestion, Sparkles, TestTubeDiagonal, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, FlaskConical, ListChecks, Microscope, RotateCcw, ShieldQuestion, Siren, Sparkles, TestTubeDiagonal, X, XCircle } from "lucide-react";
 import { api } from "../lib/api";
 import { useLive, usePoll } from "../lib/live";
 import { Empty, Loader, SevPill, StatusPill, toast } from "../components/ui";
@@ -21,6 +21,79 @@ const REASON: Record<string, (r: any) => string> = {
   sites: (r) => r.s, intermittent: () => "intermittent supply", stale: (r) => `not tested for ${r.n} days`, never: () => "not tested yet",
 };
 
+function limitText(p: any): string {
+  if (!p) return "–";
+  const u = p.unit ? ` ${p.unit}` : "";
+  if (p.max != null) return `${p.min} to ${p.max}`;
+  if (p.acceptable == null) return `at least ${p.min}${u}`;
+  return p.acceptable === p.permissible ? `up to ${p.acceptable}${u}` : `up to ${p.acceptable}${u} (permissible ${p.permissible})`;
+}
+const VERDICT: Record<string, [string, string]> = { ok: ["good", "within limit"], caution: ["medium", "above acceptable"], fail: ["critical", "outside limit"], pending: ["info", "waiting"] };
+
+/** The result of a test, why it came out that way, what the system already did, and what to do next. */
+function TestResult({ r, params, onClose, onOpen, onRetest, onH2s }: { r: any; params: any[]; onClose: () => void; onOpen: () => void; onRetest: () => void; onH2s: (positive: boolean) => void }) {
+  const fail = r.result === "fail", pend = r.result === "pending";
+  const by = Object.fromEntries(params.map((p: any) => [p.key, p]));
+  const f = r.follow_up || {};
+  const nFail = (r.checks || []).filter((c: any) => c.status === "fail").length;
+  const tone = fail ? "var(--crit)" : pend ? "var(--warn)" : "var(--good)";
+  const done: [boolean, string][] = [
+    [!!f.lab_referral, "Laboratory confirmation requested for this sample."],
+    [!!f.incident && f.incident_opened, `Incident ${f.incident} opened for ${f.scope || f.advised || "this supply"}, assigned to the FTK team and tracked against its deadline.`],
+    [!!f.incident && !f.incident_opened, `Recorded as evidence on incident ${f.incident}${fail ? "" : r.result === "pass" ? ": counts towards closing it" : ""}.`],
+    [f.advisory === "boil", `Boil-water advisory sent to ${f.advised_households} households on ${f.advised}, in their language, in the app and on linked phones; the operator and Pani Samiti were alerted.`],
+    [f.advisory === "alternate_source", `${f.advised_households} households on ${f.advised} told to drink and cook with water from another safe source (boiling does not remove ${(f.failed || []).join(", ").toLowerCase()}), in their language, in the app and on linked phones.`],
+    [fail && !f.advisory, `No household advisory: ${(f.failed || []).join(", ").toLowerCase()} is not an immediate health risk. The operator was alerted to fix it.`],
+    [true, "Result queued for WQMIS with the scheme's Sujal Gaon ID."],
+  ];
+  return (
+    <div className="card" style={{ marginTop: 16, borderColor: tone, boxShadow: `inset 4px 0 0 ${tone}, var(--shadow)` }}>
+      <div className="card-h">
+        <h3 style={{ color: tone }}>{fail ? <XCircle /> : pend ? <Clock /> : <CheckCircle2 />}
+          {fail ? `Outside the limits: ${nFail} parameter${nFail === 1 ? "" : "s"} failed` : pend ? "Recorded: waiting for the H2S vial" : "Within the drinking-water limits"}</h3>
+        <button className="btn ghost icon sm" onClick={onClose} aria-label="Close"><X /></button>
+      </div>
+      <div className="card-b stack" style={{ gap: 14 }}>
+        <div className="sm muted">{r.id} · {r.kind === "FTK" ? "Field test kit" : "Laboratory"} · {r.sample_point} · {dt(r.ts)} · judged against IS 10500:2012</div>
+        <div className="tbl-wrap" style={{ border: "1px solid var(--line)" }}>
+          <table className="tbl">
+            <thead><tr><th>Parameter</th><th>Reading</th><th>Limit</th><th>Result</th></tr></thead>
+            <tbody>{(r.checks || []).map((c: any) => (
+              <tr key={c.key} style={c.status === "fail" ? { background: "var(--crit-bg)" } : undefined}>
+                <td><b>{c.label}</b></td>
+                <td className="num">{c.key === "h2s_positive" ? (c.value === null ? "vial set up" : c.value ? "turned black" : "stayed clear") : `${c.value}${by[c.key]?.unit ? ` ${by[c.key].unit}` : ""}`}</td>
+                <td className="sm muted">{c.key === "h2s_positive" ? "must stay clear" : limitText(by[c.key])}</td>
+                <td><span className={`pill ${VERDICT[c.status][0]}`}>{VERDICT[c.status][1]}</span></td>
+              </tr>))}</tbody>
+          </table>
+        </div>
+
+        <div>
+          <div className="upper muted" style={{ marginBottom: 7 }}>Done automatically</div>
+          <div className="stack" style={{ gap: 6 }}>{done.filter(([on]) => on).map(([, text]) => <div key={text} className="row sm" style={{ alignItems: "flex-start" }}><CheckCircle2 size={16} color="var(--good)" style={{ flex: "none", marginTop: 1 }} />{text}</div>)}</div>
+        </div>
+
+        {(r.advice?.length > 0 || pend) && <div>
+          <div className="upper muted" style={{ marginBottom: 7 }}>What to do next</div>
+          <div className="stack" style={{ gap: 10 }}>
+            {pend && <div className="note warn"><Clock /><span>Read the H2S vial 24 to 48 hours after setting it up. A black vial means possible faecal contamination.
+              <span className="row" style={{ marginTop: 8, gap: 8 }}><button className="btn sm" onClick={() => onH2s(false)}>Stayed clear</button><button className="btn sm" style={{ background: "#1d1d1d" }} onClick={() => onH2s(true)}>Turned black</button></span></span></div>}
+            {(r.advice || []).map((a: any) => (
+              <div key={a.key} className={`note ${a.status === "fail" ? "warn" : ""}`}><AlertTriangle /><div><b>{a.title}</b>
+                <ol style={{ margin: "5px 0 0", paddingLeft: 18, lineHeight: 1.55 }}>{a.steps.map((x: string) => <li key={x}>{x}</li>)}</ol></div></div>))}
+          </div>
+        </div>}
+
+        <div className="row wrap" style={{ gap: 8 }}>
+          {f.incident && <button className="btn sm" onClick={onOpen}><Siren />Open incident {f.incident}</button>}
+          {fail && <button className="btn ghost sm" onClick={onRetest}><RotateCcw />Re-test this point after the fix</button>}
+          {fail && <span className="xs muted row" style={{ gap: 5 }}><ListChecks size={13} />The incident closes on a passing re-test or a laboratory result.</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Quality() {
   const { village, focus } = useLive();
   const nav = useNavigate();
@@ -29,6 +102,7 @@ export function Quality() {
   const [form, setForm] = useState<any>({ sample_point: "Tank outlet", kind: "FTK", h2s_positive: false, incident_id: "" });
   const { data: plan } = usePoll<any>(`/api/quality/plan?village=${village}`, 6000);
   const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<any>(null);
   if (!q) return <div className="page"><Loader /></div>;
 
   const sample = async () => {
@@ -47,7 +121,8 @@ export function Quality() {
       const params: any = { h2s_positive: !!form.h2s_positive };
       for (const k of [...q.ftk_params.map((p: any) => p.key), "turbidity_ntu", "tds_mgl"]) if (form[k] !== "" && form[k] != null) params[k] = Number(form[k]);
       const r = await api("/api/quality/tests", { body: { village_id: village, sample_point: form.sample_point, kind: form.kind, params, incident_id: form.incident_id || null } });
-      toast(r.result === "pass" ? `${r.id}: PASS, recorded and queued for WQMIS sync` : `${r.id}: FAIL (${r.failed_checks.join("; ")})`, r.result !== "pass");
+      setResult(r);
+      toast(r.result === "pass" ? `${r.id}: within limits` : r.result === "pending" ? `${r.id}: waiting for the H2S vial` : `${r.id}: outside the limits, see below`, r.result === "fail");
       reload();
     } catch (e: any) { toast(e.message, true); }
     setBusy(false);
@@ -110,6 +185,9 @@ export function Quality() {
             </div>
             <label className="row sm" style={{ margin: "12px 0", cursor: "pointer" }}><input type="checkbox" checked={!!form.h2s_positive} onChange={(e) => setForm({ ...form, h2s_positive: e.target.checked })} />H2S vial turned black within 24 to 48 h (possible bacteriological contamination)</label>
             <button className="btn" disabled={busy} onClick={save}><Microscope />Save and queue for WQMIS sync</button>
+            {result && <TestResult r={result} params={q.ftk_params} onClose={() => setResult(null)} onOpen={() => nav(`/app/incidents/${result.incident_id}`)}
+              onRetest={() => { setForm({ sample_point: result.sample_point, kind: "FTK", h2s_positive: false, incident_id: result.incident_id || "" }); setResult(null); }}
+              onH2s={async (positive: boolean) => { try { setResult(await api(`/api/quality/tests/${result.id}/h2s`, { method: "PATCH", body: { positive } })); reload(); } catch (e: any) { toast(e.message, true); } }} />}
           </div>
         </div>
         <div className="stack">
