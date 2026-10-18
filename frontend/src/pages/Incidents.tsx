@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  AlertTriangle, BadgeCheck, Building2, CheckCircle2, ClipboardCheck, Clock, FlaskConical, Hammer, Lock, MapPin, MessageSquareText, NotebookPen,
+  AlertTriangle, BadgeCheck, BellRing, Building2, CheckCircle2, ClipboardCheck, Clock, FlaskConical, Hammer, Lock, MapPin, MessageSquareText, NotebookPen,
   Play, RotateCcw, ShieldAlert, Siren, Timer, TrendingUp, UserCheck, Users, Wrench, XCircle,
 } from "lucide-react";
-import { api, getSession } from "../lib/api";
+import { api, getSession, resolveUrl } from "../lib/api";
 import { useLive, usePoll } from "../lib/live";
 import { Drawer, Empty, Loader, OriginPill, SevPill, StatusPill, toast } from "../components/ui";
 import { CAT_LABEL, INC_STATUS, LANG_NAME, dt, dur, hhmm, minsBetween, n1 } from "../lib/format";
@@ -203,6 +203,21 @@ function IncidentDrawer({ id, onClose }: { id: string; onClose: () => void }) {
         {d.closure_reason && <p className="sm" style={{ marginTop: 8 }}><b>Closed:</b> {d.closure_reason}</p>}
       </div>
 
+      {d.deliveries?.length > 0 && (
+        <div className="card pad">
+          <div className="row between"><div className="upper muted">Phone alerts sent</div><span className="pill info"><BellRing />{d.deliveries.length}</span></div>
+          <div className="stack" style={{ gap: 6, marginTop: 9 }}>
+            {d.deliveries.map((x: any) => (
+              <div key={x.id} className="row between sm" style={{ gap: 8 }}>
+                <span><b>{x.name}</b> <span className="xs muted">· {x.channel} {x.address}{x.kind && x.kind.startsWith("escalation") ? " · escalation" : ""}</span></span>
+                <span className={`pill ${x.status === "sent" ? "good" : x.status === "sandbox" ? "demo" : x.status === "failed" ? "critical" : "medium"}`} title={x.last_error || ""}>{x.status === "sent" ? "delivered" : x.status}</span>
+              </div>
+            ))}
+          </div>
+          {d.deliveries.some((x: any) => x.status === "sandbox") && <p className="xs muted" style={{ marginTop: 8 }}>Sandbox: routed and written, not sent (no channel configured, or a placeholder DEMO number).</p>}
+        </div>
+      )}
+
       {evRows.length > 0 && (
         <div className="card pad">
           <div className="upper muted" style={{ marginBottom: 8 }}>Evidence snapshot</div>
@@ -220,7 +235,7 @@ function IncidentDrawer({ id, onClose }: { id: string; onClose: () => void }) {
           <div className="stack" style={{ gap: 7 }}>
             {d.complaints.map((c: any) => (
               <div key={c.id} className="card pad sm row" style={{ alignItems: "flex-start" }}>
-                {c.photo && <img src={c.photo} alt="citizen photo" style={{ width: 56, height: 56, borderRadius: 10, objectFit: "cover" }} />}
+                {c.photo && <img src={resolveUrl(c.photo)} alt="citizen photo" style={{ width: 56, height: 56, borderRadius: 10, objectFit: "cover" }} />}
                 <div className="grow">
                   <div className="row between wrap"><b>{CAT_LABEL[c.category]} · {c.household_id.split("-").slice(1).join("-")}</b>
                     <span className="row" style={{ gap: 5 }}><span className="tag">{c.channel}</span><span className="tag">{LANG_NAME[c.language] || c.language}</span>{c.source === "simulated-citizen" && <span className="tag">simulated</span>}</span></div>

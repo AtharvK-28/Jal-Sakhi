@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { HeartHandshake, Languages, Link2, MessageSquareText, MessageSquare, Phone, Smartphone, Sparkles, ThumbsUp } from "lucide-react";
+import { HeartHandshake, Languages, Link2, MessageCircle, MessageSquareText, MessageSquare, Phone, Send, Smartphone, Sparkles, ThumbsUp } from "lucide-react";
 import { api } from "../lib/api";
 import { useLive, usePoll } from "../lib/live";
 import { Empty, Kpi, Loader, StatusPill, toast } from "../components/ui";
 import { BarList } from "../components/charts";
 import { CAT_LABEL, LANG_NAME, dt, n0 } from "../lib/format";
 
-const CHANNEL: Record<string, any> = { app: Smartphone, sms: MessageSquare, ivr: Phone };
+const CHANNEL: Record<string, any> = { app: Smartphone, sms: MessageSquare, ivr: Phone, telegram: Send, whatsapp: MessageCircle };
 
 export function Complaints() {
   const { snap, village } = useLive();

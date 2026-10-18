@@ -14,6 +14,7 @@ import { AIInsights } from "./pages/AIInsights";
 import { Analytics } from "./pages/Analytics";
 import { Upkeep } from "./pages/Upkeep";
 import { Integration } from "./pages/Integration";
+import { Alerts } from "./pages/Alerts";
 import { Devices } from "./pages/Devices";
 import { About } from "./pages/About";
 import { CitizenApp } from "./citizen/CitizenApp";
@@ -42,6 +43,7 @@ export function App() {
           <Route path="incidents" element={<Incidents />} />
           <Route path="incidents/:id" element={<Incidents />} />
           <Route path="complaints" element={<Complaints />} />
+          <Route path="alerts" element={<Alerts />} />
           <Route path="quality" element={<Quality />} />
           <Route path="upkeep" element={<Upkeep />} />
           <Route path="ai" element={<AIInsights />} />

@@ -27,6 +27,13 @@ export function Quality() {
   const sample = async () => {
     try { const s = await api(`/api/quality/ftk-sample?village=${village}`); setForm({ ...form, ...s.params }); } catch (e: any) { toast(e.message, true); }
   };
+  const pull = async () => {
+    try {
+      const r = await api(`/api/quality/wqmis/pull?village=${village}`, { method: "POST" });
+      toast(r.imported.length ? `${r.imported.length} laboratory result(s) received from WQMIS (sandbox)` : r.note);
+      reload();
+    } catch (e: any) { toast(e.message, true); }
+  };
   const save = async () => {
     setBusy(true);
     try {
@@ -101,11 +108,12 @@ export function Quality() {
               <button key={i.id} className="scn" style={{ gridTemplateColumns: "1fr", marginBottom: 8 }} onClick={() => nav(`/app/incidents/${i.id}`)}>
                 <span><b>{i.title}</b><span className="row wrap" style={{ gap: 6, marginTop: 5 }}><SevPill sev={i.severity} /><StatusPill status={i.status} /><span className="muted xs">{i.id}</span></span></span></button>))}
           </div></div>
-          <div className="card"><div className="card-h"><h3>Test history</h3></div><div className="card-b">
+          <div className="card"><div className="card-h"><h3>Test history</h3>
+            {q.tests.some((t: any) => t.lab_status === "requested") && <button className="btn soft sm" onClick={pull}><Microscope />DEMO: lab results from WQMIS</button>}</div><div className="card-b">
             {q.tests.length === 0 ? <p className="sm muted">No tests recorded in this session.</p> : q.tests.map((t: any) => (
               <div key={t.id} className="row between sm" style={{ padding: "7px 0", borderBottom: "1px solid var(--line)" }}>
                 <div><b>{t.id}</b> · {t.kind} · {t.sample_point}<div className="xs muted">{dt(t.ts)} · {t.tested_by}{t.incident_id ? ` · ${t.incident_id}` : ""} · turbidity {n1(t.params.turbidity_ntu)} · Cl {n1(t.params.chlorine_mgl, 2)}{t.params.tds_mgl != null ? ` · TDS ${n0(t.params.tds_mgl)}` : ""}</div></div>
-                <span className={`pill ${t.result === "pass" ? "good" : "critical"}`}>{t.result}{t.lab_status ? " · lab requested" : ""}</span>
+                <span className={`pill ${t.result === "pass" ? "good" : "critical"}`} title={t.lab_status || ""}>{t.kind === "LAB" ? "lab " : ""}{t.result}{t.lab_status === "requested" ? " · lab requested" : t.lab_status?.startsWith("lab ") ? ` · ${t.lab_status.split(":")[0]}` : ""}</span>
               </div>))}
           </div></div>
         </div>

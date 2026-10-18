@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
-  BarChart3, ChevronRight, Cpu, Droplets, FlaskConical, Home, LayoutDashboard, LogOut, Map as MapIcon, Menu, MessageSquareText,
+  BarChart3, BellRing, ChevronRight, Cpu, Droplets, FlaskConical, Home, LayoutDashboard, LogOut, Map as MapIcon, Menu, MessageSquareText,
   Moon, Network, Pause, RefreshCw, ShieldCheck, Siren, Smartphone, Sparkles, Sun, Volume2, VolumeX, WifiOff, Wrench,
 } from "lucide-react";
 import { api, clearSession, getSession } from "../lib/api";
@@ -18,6 +18,7 @@ const NAV = [
   { grp: "Respond" },
   { to: "/app/incidents", icon: Siren, label: "Alerts & incidents", count: "incidents" },
   { to: "/app/complaints", icon: MessageSquareText, label: "Citizen voice", count: "complaints" },
+  { to: "/app/alerts", icon: BellRing, label: "Phone alerts" },
   { to: "/app/quality", icon: FlaskConical, label: "Water quality" },
   { to: "/app/upkeep", icon: Wrench, label: "Upkeep & accounts" },
   { grp: "Intelligence" },

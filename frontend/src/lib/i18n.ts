@@ -59,6 +59,9 @@ const en = {
   aank_comment_ph: "Tell us why (optional)", aank_thanks: "Your answer has been recorded.",
   aank_tally: "Answers so far: {n} · {p}% agree", aank_closed: "The time for answers is over.", aank_overall: "Overall",
   sec_service: "Regular and enough water", sec_quality: "Water quality", sec_om: "Upkeep and repairs", sec_source: "Water source", sec_institution: "Committee and accounts",
+  ph_title: "Get water alerts on your phone", ph_body: "Alerts for your tap arrive on Telegram or WhatsApp, even when this app is closed. Reply to report a problem or send a photo.", ph_btn: "Get alerts on my phone", ph_on: "Alerts are on: {c}", ph_open_tg: "Open Telegram", ph_open_wa: "Open WhatsApp", ph_off: "Phone alerts are not switched on in this demo yet. Your code: {c}", inst_title: "Install JalSakhi", inst_body: "Add it to your home screen. It opens without network and sends saved reports when the network returns.", inst_btn: "Install",
+  n_advisory_cleared: "Laboratory result: your water is within the drinking-water limits again. Normal use can resume.",
+  offline_view: "No network. Showing what was known at {t}.",
 };
 type Dict = Partial<typeof en>;
 
@@ -113,6 +116,9 @@ const hi: Dict = {
   aank_comment_ph: "कारण बताएँ (ज़रूरी नहीं)", aank_thanks: "आपका जवाब दर्ज हो गया है।",
   aank_tally: "अब तक {n} जवाब · {p}% सहमत", aank_closed: "जवाब देने का समय समाप्त हो गया है।", aank_overall: "कुल",
   sec_service: "नियमित और पर्याप्त पानी", sec_quality: "पानी की गुणवत्ता", sec_om: "रखरखाव और मरम्मत", sec_source: "जल स्रोत", sec_institution: "समिति और हिसाब-किताब",
+  ph_title: "पानी की सूचनाएँ अपने फ़ोन पर पाएँ", ph_body: "आपके नल की सूचनाएँ टेलीग्राम या व्हाट्सऐप पर आएँगी, ऐप बंद होने पर भी। जवाब में आप शिकायत या फ़ोटो भेज सकते हैं।", ph_btn: "मेरे फ़ोन पर अलर्ट", ph_on: "अलर्ट चालू हैं: {c}", ph_open_tg: "टेलीग्राम खोलें", ph_open_wa: "व्हाट्सऐप खोलें", ph_off: "इस डेमो में फ़ोन अलर्ट अभी चालू नहीं हैं। आपका कोड: {c}", inst_title: "जलसखी इंस्टॉल करें", inst_body: "इसे होम स्क्रीन पर जोड़ें। यह बिना नेटवर्क के भी खुलेगा और नेटवर्क आने पर सहेजी गई शिकायतें भेज देगा।", inst_btn: "इंस्टॉल करें",
+  n_advisory_cleared: "प्रयोगशाला का नतीजा: आपका पानी फिर से पेयजल की सीमाओं के भीतर है। सामान्य उपयोग फिर से शुरू कर सकते हैं।",
+  offline_view: "नेटवर्क नहीं है। {t} तक की जानकारी दिखाई जा रही है।",
 };
 
 const mr: Dict = {
@@ -166,6 +172,9 @@ const mr: Dict = {
   aank_comment_ph: "कारण सांगा (ऐच्छिक)", aank_thanks: "तुमचे उत्तर नोंदवले आहे.",
   aank_tally: "आतापर्यंत {n} उत्तरे · {p}% सहमत", aank_closed: "उत्तर देण्याची मुदत संपली आहे.", aank_overall: "एकूण",
   sec_service: "नियमित आणि पुरेसे पाणी", sec_quality: "पाण्याची गुणवत्ता", sec_om: "देखभाल आणि दुरुस्ती", sec_source: "पाण्याचा स्रोत", sec_institution: "समिती आणि हिशोब",
+  ph_title: "पाण्याच्या सूचना तुमच्या फोनवर मिळवा", ph_body: "तुमच्या नळाच्या सूचना टेलिग्राम किंवा व्हॉट्सॲपवर येतील, ॲप बंद असतानाही. उत्तरात तुम्ही तक्रार किंवा फोटो पाठवू शकता.", ph_btn: "माझ्या फोनवर अलर्ट", ph_on: "अलर्ट सुरू आहेत: {c}", ph_open_tg: "टेलिग्राम उघडा", ph_open_wa: "व्हॉट्सॲप उघडा", ph_off: "या डेमोमध्ये फोन अलर्ट अजून सुरू नाहीत. तुमचा कोड: {c}", inst_title: "जलसखी इन्स्टॉल करा", inst_body: "हे होम स्क्रीनवर जोडा. नेटवर्कशिवायही उघडेल आणि नेटवर्क आल्यावर जतन केलेल्या तक्रारी पाठवेल.", inst_btn: "इन्स्टॉल करा",
+  n_advisory_cleared: "प्रयोगशाळेचा निकाल: तुमचे पाणी पुन्हा पिण्याच्या पाण्याच्या मर्यादेत आहे. नेहमीचा वापर पुन्हा सुरू करू शकता.",
+  offline_view: "नेटवर्क नाही. {t} पर्यंतची माहिती दाखवत आहे.",
 };
 
 const bn: Dict = {
@@ -219,6 +228,9 @@ const bn: Dict = {
   aank_comment_ph: "কারণ বলুন (ঐচ্ছিক)", aank_thanks: "আপনার উত্তর নথিভুক্ত হয়েছে।",
   aank_tally: "এ পর্যন্ত {n}টি উত্তর · {p}% একমত", aank_closed: "উত্তর দেওয়ার সময় শেষ হয়েছে।", aank_overall: "মোট",
   sec_service: "নিয়মিত ও পর্যাপ্ত জল", sec_quality: "জলের গুণমান", sec_om: "রক্ষণাবেক্ষণ ও মেরামত", sec_source: "জলের উৎস", sec_institution: "কমিটি ও হিসাব",
+  ph_title: "জলের খবর আপনার ফোনে পান", ph_body: "আপনার কলের খবর টেলিগ্রাম বা হোয়াটসঅ্যাপে আসবে, অ্যাপ বন্ধ থাকলেও। উত্তরে আপনি অভিযোগ বা ছবি পাঠাতে পারেন।", ph_btn: "আমার ফোনে অ্যালার্ট", ph_on: "অ্যালার্ট চালু আছে: {c}", ph_open_tg: "টেলিগ্রাম খুলুন", ph_open_wa: "হোয়াটসঅ্যাপ খুলুন", ph_off: "এই ডেমোতে ফোন অ্যালার্ট এখনও চালু হয়নি। আপনার কোড: {c}", inst_title: "জলসখী ইনস্টল করুন", inst_body: "এটি হোম স্ক্রিনে যোগ করুন। নেটওয়ার্ক ছাড়াও খুলবে, আর নেটওয়ার্ক ফিরলে জমা থাকা অভিযোগ পাঠিয়ে দেবে।", inst_btn: "ইনস্টল করুন",
+  n_advisory_cleared: "পরীক্ষাগারের ফল: আপনার জল আবার পানীয় জলের সীমার মধ্যে। স্বাভাবিক ব্যবহার আবার শুরু করতে পারেন।",
+  offline_view: "নেটওয়ার্ক নেই। {t} পর্যন্ত জানা তথ্য দেখানো হচ্ছে।",
 };
 
 const ta: Dict = {
@@ -272,6 +284,9 @@ const ta: Dict = {
   aank_comment_ph: "காரணத்தைச் சொல்லுங்கள் (விருப்பம்)", aank_thanks: "உங்கள் பதில் பதிவு செய்யப்பட்டது.",
   aank_tally: "இதுவரை {n} பதில்கள் · {p}% ஒப்புதல்", aank_closed: "பதிலளிக்கும் காலம் முடிந்துவிட்டது.", aank_overall: "மொத்தம்",
   sec_service: "தவறாத, போதுமான தண்ணீர்", sec_quality: "தண்ணீர் தரம்", sec_om: "பராமரிப்பும் பழுது பார்த்தலும்", sec_source: "நீர் ஆதாரம்", sec_institution: "குழுவும் கணக்குகளும்",
+  ph_title: "குடிநீர் அறிவிப்புகளை உங்கள் தொலைபேசியில் பெறுங்கள்", ph_body: "உங்கள் குழாய் அறிவிப்புகள் டெலிகிராம் அல்லது வாட்ஸ்அப்பில் வரும், செயலி மூடியிருந்தாலும். பதிலாக புகார் அல்லது புகைப்படம் அனுப்பலாம்.", ph_btn: "என் தொலைபேசியில் அறிவிப்பு", ph_on: "அறிவிப்புகள் இயக்கத்தில்: {c}", ph_open_tg: "டெலிகிராமைத் திற", ph_open_wa: "வாட்ஸ்அப்பைத் திற", ph_off: "இந்த டெமோவில் தொலைபேசி அறிவிப்புகள் இன்னும் இயக்கப்படவில்லை. உங்கள் குறியீடு: {c}", inst_title: "ஜல்சகியை நிறுவுங்கள்", inst_body: "இதை முகப்புத் திரையில் சேர்க்கவும். நெட்வொர்க் இல்லாமலும் திறக்கும், நெட்வொர்க் வந்ததும் சேமித்த புகார்களை அனுப்பும்.", inst_btn: "நிறுவு",
+  n_advisory_cleared: "ஆய்வக முடிவு: உங்கள் குடிநீர் மீண்டும் வரம்புகளுக்குள் உள்ளது. வழக்கமான பயன்பாட்டைத் தொடரலாம்.",
+  offline_view: "நெட்வொர்க் இல்லை. {t} வரை தெரிந்த தகவல் காட்டப்படுகிறது.",
 };
 
 const te: Dict = {
@@ -325,6 +340,9 @@ const te: Dict = {
   aank_comment_ph: "కారణం చెప్పండి (ఐచ్ఛికం)", aank_thanks: "మీ సమాధానం నమోదైంది.",
   aank_tally: "ఇప్పటివరకు {n} సమాధానాలు · {p}% అంగీకరించారు", aank_closed: "సమాధానం ఇచ్చే గడువు ముగిసింది.", aank_overall: "మొత్తం",
   sec_service: "క్రమం తప్పని, సరిపడా నీరు", sec_quality: "నీటి నాణ్యత", sec_om: "నిర్వహణ, మరమ్మతులు", sec_source: "నీటి వనరు", sec_institution: "కమిటీ, లెక్కలు",
+  ph_title: "నీటి సమాచారం మీ ఫోన్‌లో పొందండి", ph_body: "మీ కుళాయి సమాచారం టెలిగ్రామ్ లేదా వాట్సాప్‌లో వస్తుంది, యాప్ మూసి ఉన్నా. జవాబుగా ఫిర్యాదు లేదా ఫోటో పంపవచ్చు.", ph_btn: "నా ఫోన్‌లో అలర్ట్", ph_on: "అలర్ట్‌లు ఆన్‌లో ఉన్నాయి: {c}", ph_open_tg: "టెలిగ్రామ్ తెరవండి", ph_open_wa: "వాట్సాప్ తెరవండి", ph_off: "ఈ డెమోలో ఫోన్ అలర్ట్‌లు ఇంకా ఆన్ కాలేదు. మీ కోడ్: {c}", inst_title: "జలసఖిని ఇన్‌స్టాల్ చేయండి", inst_body: "దీన్ని హోమ్ స్క్రీన్‌కు జోడించండి. నెట్‌వర్క్ లేకపోయినా తెరుచుకుంటుంది, నెట్‌వర్క్ రాగానే దాచిన ఫిర్యాదులను పంపుతుంది.", inst_btn: "ఇన్‌స్టాల్ చేయండి",
+  n_advisory_cleared: "ప్రయోగశాల ఫలితం: మీ నీరు మళ్లీ తాగునీటి పరిమితుల్లో ఉంది. సాధారణ వినియోగాన్ని మళ్లీ మొదలుపెట్టవచ్చు.",
+  offline_view: "నెట్‌వర్క్ లేదు. {t} వరకు తెలిసిన సమాచారం చూపిస్తున్నాం.",
 };
 
 const ALL: Record<Lang, Dict> = { en, hi, mr, bn, ta, te };
